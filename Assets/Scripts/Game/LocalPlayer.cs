@@ -34,16 +34,7 @@ public class LocalPlayer : MonoBehaviour
         float translation = Input.GetAxis("Mouse X") * this.CameraRotSpeedX * Time.deltaTime;
         float rotation = -Input.GetAxis("Mouse Y") * this.CameraRotSpeedY * Time.deltaTime;
 
-        var camTransform = this.playerCamera.transform;
-        Vector3 currentRotation = camTransform.localEulerAngles;
-        currentRotation.x += rotation;
-        currentRotation.x = Mathf.Clamp(currentRotation.x, -90f, 90f);
 
-        camTransform.localRotation = Quaternion.Euler(currentRotation.x, 0, 0);
-
-        var playerRotation = this.transform.rotation.eulerAngles;
-        playerRotation.y += translation;
-        this.transform.rotation = Quaternion.Euler(0, playerRotation.y, 0);
 
         Player.PlayerMovement movement = Player.PlayerMovement.None;
 
@@ -62,7 +53,19 @@ public class LocalPlayer : MonoBehaviour
         if (Input.GetKey(KeyCode.Space))
             movement |= Player.PlayerMovement.Up;
 
-        this.owningPlayer.OnClientMoveRpc(movement, this.transform.rotation.eulerAngles);
+        if(rotation != 0.0f)
+        {
+            this.playerCamera.transform.Rotate(rotation, 0.0f, 0.0f);
+        }
+
+        if(translation != 0.0f)
+        {
+            Vector3 addEuler = new Vector3(0.0f, translation, 0.0f);
+
+            this.owningPlayer.OnClientRotateRpc(addEuler);
+        }
+
+        this.owningPlayer.OnClientMoveRpc(movement);
     }
 
     private void SpectatePlayer()

@@ -26,6 +26,8 @@ public class Player : NetworkBehaviour
     public string playerName = "";
     public ulong id = 0; // Connection id this Player belongs to
 
+    private float movementDrag = 6.0f;
+
     public float movementSpeed = 6.0f; // can only be changed by Server
     public float jumpHeight = 4.0f; // can only be changed by Server
 
@@ -66,25 +68,15 @@ public class Player : NetworkBehaviour
     }
 
     [ClientRpc]
-    public void OnNetworkUpdatePositionClientRpc(Vector3 position, Vector3 velocity, Quaternion rotation)
+    public void OnNetworkUpdatePositionClientRpc(Vector3 position, Vector3 velocity)
     {
         if(this.playerRigidBody)
         {
-
-            var euelers = rotation.eulerAngles;
-            var otherEueler = this.transform.rotation.eulerAngles;
-
-            euelers.x = otherEueler.x;
-            euelers.z = otherEueler.z;
-
-            this.transform.rotation = Quaternion.Euler(euelers);
             this.playerRigidBody.position = position;
 
             if (velocity.x != 0.0f || velocity.y != 0.0f || velocity.z != 0.0f)
             {
-                var normalizedRotation = this.transform.forward.normalized;
-
-                this.playerRigidBody.linearVelocity = new Vector3(velocity.x, velocity.y * normalizedRotation.y, velocity.z * normalizedRotation.z);
+                this.playerRigidBody.linearVelocity = new Vector3(velocity.x, velocity.y, velocity.z);
             }
                 
 
@@ -93,60 +85,102 @@ public class Player : NetworkBehaviour
         }
     }
 
+    [ClientRpc]
+    public void OnNetworkUpdateRotationClientRpc(Vector3 rotation)
+    {
+        this.transform.Rotate(rotation);
+    }
+
     [ServerRpc]
-    public void OnMoveCharacterServerRpc(PlayerMovement movingDir, Quaternion rotation, ServerRpcParams param = default)
+    public void OnRotateCharacterServerRpc(Vector3 addValue)
+    {
+        OnNetworkUpdateRotationClientRpc(addValue);
+    }
+
+    [ServerRpc]
+    public void OnMoveCharacterServerRpc(PlayerMovement movingDir, ServerRpcParams param = default)
     {
         if(IsHost)
         {
-            float forward = 0.0f;
-            float right = 0.0f;
-            float up = 0.0f;
+            float deltaTime = Time.deltaTime;
+
+            Vector3 currentPosition = transform.position;
+
+            Vector3 nextPosition = currentPosition;
 
             if ((movingDir & PlayerMovement.Forward) == PlayerMovement.Forward)
             {
-                forward = 1.0f;
+                Vector3 fw = transform.forward;
+
+                nextPosition.x += (fw.x * movementSpeed);
+                nextPosition.z += (fw.z * movementSpeed);
             }
 
             if ((movingDir & PlayerMovement.Backward) == PlayerMovement.Backward)
             {
-                forward -= 1.0f;
+                Vector3 fw = transform.forward;
+
+                nextPosition.x -= (fw.x * movementSpeed);
+                nextPosition.z -= (fw.z * movementSpeed);
             }
 
             if ((movingDir & PlayerMovement.Right) == PlayerMovement.Right)
             {
-                right = 1.0f;
+                Vector3 r = transform.right;
+
+                nextPosition.x += (r.x * movementSpeed);
+                nextPosition.z += (r.z * movementSpeed);
             }
 
             if ((movingDir & PlayerMovement.Left) == PlayerMovement.Left)
             {
-                right -= 1.0f;
+                Vector3 r = transform.right;
+
+                nextPosition.x -= (r.x * movementSpeed);
+                nextPosition.z -= (r.z * movementSpeed);
             }
 
             if ((movingDir & PlayerMovement.Up) == PlayerMovement.Up)
             {
-                if (!isGrounded)
-                    up = 1.0f;
+                if (isGrounded)
+                {
+                    Vector3 up = transform.up;
+
+                    nextPosition.y += (up.y * jumpHeight);
+                }
             }
 
             if ((movingDir & PlayerMovement.Down) == PlayerMovement.Down)
             {
                 if (!isGrounded)
-                    up -= 1.0f;
+                {
+                    Vector3 up = transform.up;
+
+                    nextPosition.y -= (up.y * jumpHeight);
+                }
             }
 
-            Vector3 velocity = ((Vector3.forward * forward) * this.movementSpeed) + ((Vector3.right * right) * this.movementSpeed) +
-                ((Vector3.up * up) * this.movementSpeed);
+            bool isMoving = !(movingDir == PlayerMovement.None);
 
-            this.OnNetworkUpdatePositionClientRpc(this.playerRigidBody.position, velocity, Quaternion.Euler(0, rotation.eulerAngles.y, 0));
+            Vector3 velocity = (isMoving ? (currentPosition - nextPosition) : Vector3.zero);
+
+            if(isMoving)
+                Debug.Log($"Velocity: x{velocity.x}, y{velocity.y}, z{velocity.z}");
+
+            this.OnNetworkUpdatePositionClientRpc(this.playerRigidBody.position, velocity);
         }
     }
 
     [Rpc(SendTo.Server)]
-    public void OnClientMoveRpc(Player.PlayerMovement movement, Vector3 eulerAngles)
+    public void OnClientMoveRpc(Player.PlayerMovement movement)
     {
-        Debug.Log("Rotation: " + eulerAngles.y);
+        OnMoveCharacterServerRpc(movement);
+    }
 
-        OnMoveCharacterServerRpc(movement, Quaternion.Euler(new Vector3(eulerAngles.x, eulerAngles.y, 0.0f)));
+    [Rpc(SendTo.Server)]
+    public void OnClientRotateRpc(Vector3 addValue)
+    {
+        OnRotateCharacterServerRpc(addValue);
     }
 
     private void OnDestroy()
@@ -163,7 +197,7 @@ public class Player : NetworkBehaviour
     {
         if(IsHost)
         {
-            this.OnNetworkUpdatePositionClientRpc(playerRigidBody.position, Vector3.zero, transform.rotation);
+            this.OnNetworkUpdatePositionClientRpc(playerRigidBody.position, Vector3.zero);
         }
     }
 
