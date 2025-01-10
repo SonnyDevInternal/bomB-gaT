@@ -118,6 +118,8 @@ public class ServerManager : NetworkBehaviour
 
         inst.transform.parent = localPlayer.transform;
 
+        inst.transform.rotation = localPlayer.transform.rotation;
+
         inst.GetComponent<LocalPlayer>().BindNetworkPlayer(localPlayer.GetComponent<Player>());
     }
 

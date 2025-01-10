@@ -162,10 +162,7 @@ public class Player : NetworkBehaviour
 
             bool isMoving = !(movingDir == PlayerMovement.None);
 
-            Vector3 velocity = (isMoving ? (currentPosition - nextPosition) : Vector3.zero);
-
-            if(isMoving)
-                Debug.Log($"Velocity: x{velocity.x}, y{velocity.y}, z{velocity.z}");
+            Vector3 velocity = (isMoving ? (nextPosition - currentPosition) : Vector3.zero);
 
             this.OnNetworkUpdatePositionClientRpc(this.playerRigidBody.position, velocity);
         }
