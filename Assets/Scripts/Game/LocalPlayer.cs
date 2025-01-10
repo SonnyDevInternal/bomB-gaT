@@ -1,6 +1,5 @@
 using Unity.Netcode;
 using UnityEngine;
-using static Player;
 
 public class LocalPlayer : MonoBehaviour
 {
@@ -91,14 +90,27 @@ public class LocalPlayer : MonoBehaviour
         //this.playerCamera.transform.rotation = player.transform.rotation;
     }
 
+
     public void BindNetworkPlayer(Player player)
     {
         this.owningPlayer = player;
         this.hasPlayer = true;
 
+        player.isLocalPlayer = true;
+
         player.BindOnDestroy(OnPlayerDestroyed);
         player.BindOnUpdate(OnPlayerUpdated);
 
         Cursor.lockState = CursorLockMode.Locked;
+    }
+
+    public void OnInitializedLocalPlayer()
+    {
+        if (this.owningPlayer.serverManager)
+        {
+            var serverManager = this.owningPlayer.serverManager.GetComponent<ServerManager>();
+
+            serverManager.GetServerPlayerDataRpc();
+        }
     }
 }

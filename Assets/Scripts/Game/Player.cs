@@ -15,18 +15,26 @@ public class Player : NetworkBehaviour
         Down = 1 << 6,
     }
 
-    private GameObject serverManager = null;
+    public GameObject serverManager = null;
 
     [SerializeField]
     private GameObject head = null;
 
     private Rigidbody playerRigidBody = null;
+    private CapsuleCollider playerCapsuleCollider = null;
+
     private bool isGrounded = false;
+    private bool receivedJoiningData = false;
+
+    public bool isLocalPlayer = false;
 
     public string playerName = "";
     public ulong id = 0; // Connection id this Player belongs to
 
     private float movementDrag = 6.0f;
+
+    [SerializeField]
+    private float gravity = 2.0f;
 
     public float movementSpeed = 6.0f; // can only be changed by Server
     public float jumpHeight = 4.0f; // can only be changed by Server
@@ -37,14 +45,16 @@ public class Player : NetworkBehaviour
     private OnUpdatePlayer onUpdatePlayer;
     private OnDestroyPlayer onDestroyPlayer;
 
+
     private void Start()
     {
         playerRigidBody = GetComponent<Rigidbody>();
+        playerCapsuleCollider = GetComponent<CapsuleCollider>();
     }
 
     private void Update()
     {
-        
+        isGrounded = Physics.Raycast(transform.position, -transform.up, playerCapsuleCollider.height / 1.9f);
     }
 
     public void BindOnUpdate(OnUpdatePlayer onUpdateValue) {this.onUpdatePlayer = onUpdateValue;}
@@ -55,6 +65,8 @@ public class Player : NetworkBehaviour
     public override void OnNetworkSpawn()
     {
         base.OnNetworkSpawn();
+
+        serverManager = GameObject.FindWithTag("ServerManager");
 
         Initialize();
     }
@@ -68,17 +80,14 @@ public class Player : NetworkBehaviour
     }
 
     [ClientRpc]
-    public void OnNetworkUpdatePositionClientRpc(Vector3 position, Vector3 velocity)
+    public void OnNetworkUpdatePositionClientRpc(Vector3 position, Vector3 velocity, bool updateVelocity = false)
     {
         if(this.playerRigidBody)
         {
             this.playerRigidBody.position = position;
 
-            if (velocity.x != 0.0f || velocity.y != 0.0f || velocity.z != 0.0f)
-            {
+            if(updateVelocity)
                 this.playerRigidBody.linearVelocity = new Vector3(velocity.x, velocity.y, velocity.z);
-            }
-                
 
             if (onUpdatePlayer != null)
                 onUpdatePlayer(this);
@@ -107,6 +116,8 @@ public class Player : NetworkBehaviour
             Vector3 currentPosition = transform.position;
 
             Vector3 nextPosition = currentPosition;
+
+            nextPosition.y -= gravity;
 
             if ((movingDir & PlayerMovement.Forward) == PlayerMovement.Forward)
             {
@@ -162,9 +173,8 @@ public class Player : NetworkBehaviour
 
             bool isMoving = !(movingDir == PlayerMovement.None);
 
-            Vector3 velocity = (isMoving ? (nextPosition - currentPosition) : Vector3.zero);
 
-            this.OnNetworkUpdatePositionClientRpc(this.playerRigidBody.position, velocity);
+            this.OnNetworkUpdatePositionClientRpc(this.playerRigidBody.position, (nextPosition - currentPosition), true);
         }
     }
 
@@ -198,6 +208,7 @@ public class Player : NetworkBehaviour
         }
     }
 
+
     private void Initialize()
     {
         if(serverManager)
@@ -213,13 +224,4 @@ public class Player : NetworkBehaviour
         return playerName;
     }
 
-    private void OnCollisionEnter(Collision collision)
-    {
-        isGrounded = true;
-    }
-
-    private void OnCollisionExit(Collision collision)
-    {
-        isGrounded = false;
-    }
 }

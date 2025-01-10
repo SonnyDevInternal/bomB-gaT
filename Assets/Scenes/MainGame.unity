@@ -332,7 +332,7 @@ GameObject:
   - component: {fileID: 608414978}
   m_Layer: 0
   m_Name: ServerManager
-  m_TagString: Untagged
+  m_TagString: ServerManager
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -934,7 +934,7 @@ MonoBehaviour:
     Prefabs:
       NetworkPrefabsLists:
       - {fileID: 11400000, guid: 922c9399cc60dcf48b1e37762f902c6b, type: 2}
-    TickRate: 30
+    TickRate: 70
     ClientConnectionBufferTimeout: 10
     ConnectionApproval: 0
     ConnectionData: 

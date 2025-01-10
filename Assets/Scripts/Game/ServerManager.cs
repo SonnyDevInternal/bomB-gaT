@@ -3,8 +3,53 @@ using System.Collections.Generic;
 using Unity.Netcode;
 using Unity.Netcode.Transports.UTP;
 using UnityEngine;
+using UnityEngine.LowLevel;
 using UnityEngine.Networking;
 using UnityEngine.UI;
+
+public struct PlayerData
+{
+    public ulong connectionid;
+    public ulong entityID;
+    public string playerName;
+}
+
+public struct PlayersData : INetworkSerializable
+{
+    public PlayerData[] Players;
+
+    public PlayersData(PlayerData[] players)
+    {
+        Players = players;
+    }
+
+    public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
+    {
+        if (serializer.IsReader)
+        {
+            int length = 0;
+            serializer.SerializeValue(ref length);
+            Players = new PlayerData[length];
+            for (int i = 0; i < length; i++)
+            {
+                serializer.SerializeValue(ref Players[i].connectionid);
+                serializer.SerializeValue(ref Players[i].entityID);
+                serializer.SerializeValue(ref Players[i].playerName);
+            }
+        }
+        else
+        {
+            int length = Players?.Length ?? 0;
+            serializer.SerializeValue(ref length);
+            for (int i = 0; i < length; i++)
+            {
+                serializer.SerializeValue(ref Players[i].connectionid);
+                serializer.SerializeValue(ref Players[i].entityID);
+                serializer.SerializeValue(ref Players[i].playerName);
+            }
+        }
+    }
+}
 
 public class ServerManager : NetworkBehaviour
 {
@@ -26,10 +71,11 @@ public class ServerManager : NetworkBehaviour
     private Button JoinBtn = null;
 
     private float defaultPlayerSpeed = 6.0f;
-    private float defaultJumpHeight = 4.0f;
+    private float defaultJumpHeight = 15.0f;
     private float defaultHeadHeight = 1.0f;
 
     private List<Player> playerList = new List<Player>();
+    private Dictionary<ulong, Player> playerIDDictionary = new Dictionary<ulong, Player>();
 
     private void Start()
     {
@@ -64,7 +110,7 @@ public class ServerManager : NetworkBehaviour
         SetConnectionData();
         NetworkManager.Singleton.StartClient();
 
-        NetworkManager.Singleton.OnClientConnectedCallback += OnPlayerCompletlyConnectedRpc;
+        NetworkManager.Singleton.OnClientConnectedCallback += OnPlayerCompletlyConnectedInternal;
     }
 
     public void SetConnectionData()
@@ -81,6 +127,9 @@ public class ServerManager : NetworkBehaviour
     {
         if(IsHost)
         {
+            if(Cookie == null)
+                NetworkManager.Singleton.DisconnectClient(connectionID);
+
             var transform = spawnPoint.transform;
 
             var instance = Instantiate(playerPrefab, transform.position, transform.rotation);
@@ -92,7 +141,10 @@ public class ServerManager : NetworkBehaviour
             playerComp.movementSpeed = defaultPlayerSpeed;
 
             if (connectionID != 0)
+            {
                 playerComp.BindOnDestroy(OnPlayerDestroyed);
+            }
+                
 
             netObjComp.Spawn(true);
 
@@ -103,7 +155,7 @@ public class ServerManager : NetworkBehaviour
             else
                 playerComp.id = senderID;
 
-            this.FindPlayerName(netObjComp.NetworkObjectId, Cookie);
+            StartCoroutine(this.FindPlayerName(netObjComp.NetworkObjectId, connectionID, Cookie));
 
             CreateLocalPlayerRpc(netObjComp.NetworkObjectId, RpcTarget.Single(playerComp.id, RpcTargetUse.Temp));
         }
@@ -120,22 +172,24 @@ public class ServerManager : NetworkBehaviour
 
         inst.transform.rotation = localPlayer.transform.rotation;
 
-        inst.GetComponent<LocalPlayer>().BindNetworkPlayer(localPlayer.GetComponent<Player>());
+        var localPlayerComp = inst.GetComponent<LocalPlayer>();
+
+        localPlayerComp.BindNetworkPlayer(localPlayer.GetComponent<Player>());
+        localPlayerComp.OnInitializedLocalPlayer();
     }
 
-    public IEnumerator<UnityWebRequestAsyncOperation> FindPlayerName(ulong entityID, string Cookie)
+
+    public IEnumerator<UnityWebRequestAsyncOperation> FindPlayerName(ulong entityID, ulong connectionID, string Cookie)
     {
         if(IsHost)
         {
-            var webrequest = UnityWebRequest.Get($"{host}/Api/User.php/{Cookie}/");
+            var webrequest = UnityWebRequest.Get($"{host}/Api/User.php?cookie={Cookie}");
 
             yield return webrequest.SendWebRequest();
 
             if (webrequest.responseCode >= 400)
             {
-                ShareNewNameClientRpc(entityID, $"Unknown Player");
-
-                Debug.Log("Name was unknown");
+                NetworkManager.Singleton.DisconnectClient(connectionID);
             }
             else
             {
@@ -143,18 +197,18 @@ public class ServerManager : NetworkBehaviour
                 {
                     var response = JsonConvert.DeserializeObject<Dictionary<string, string>>(webrequest.downloadHandler.text);
 
-                    if (response.TryGetValue("ID", out string name))
+                    if (response != null && response.TryGetValue("ID", out string name))
                     {
                         ShareNewNameClientRpc(entityID, name);
                     }
                     else
-                        ShareNewNameClientRpc(entityID, $"Unknown Player");
+                    {
+                        NetworkManager.Singleton.DisconnectClient(connectionID);
+                    }
                 }
                 catch (JsonException e)
                 {
-                    Debug.LogError("Failed to parse JSON: " + e.Message);
-
-                    ShareNewNameClientRpc(entityID, $"Unknown Player");
+                    NetworkManager.Singleton.DisconnectClient(connectionID);
                 }
             }
         }
@@ -167,21 +221,85 @@ public class ServerManager : NetworkBehaviour
 
         var obj = GetNetworkObject(entityID);
 
-        if(obj)
+        if (obj)
         {
-            var playerComp = GetComponent<Player>();
+            var playerComp = obj.GetComponent<Player>();
 
-            if(playerComp)
+            if (playerComp)
+            {
                 playerComp.playerName = newName;
+            }
+            else
+                Debug.Log("Object didnt have PlayerComponent");
+        }
+        else
+            Debug.Log("Object id was invalid");
+    }
+
+    [Rpc(SendTo.Server)]
+    public void OnPlayerCompletlyConnectedRpc(string cookie, RpcParams rpcParams = default)
+    {
+        ulong id = rpcParams.Receive.SenderClientId;
+
+        var playerList = GetPlayerList();
+
+        if(!playerList.ContainsKey(id))
+        {
+            CreatePlayerServerRpc(cookie, id);
+        }
+        else
+        {
+            NetworkManager.Singleton.DisconnectClient(id);
         }
     }
 
     [Rpc(SendTo.Server)]
-    public void OnPlayerCompletlyConnectedRpc(ulong id)
+    public void GetServerPlayerDataRpc(RpcParams rpcParams = default)
     {
-        NetworkManager.Singleton.OnClientConnectedCallback -= OnPlayerCompletlyConnectedRpc;
+        List<PlayerData> playerDataList = new List<PlayerData>(playerList.Count);
 
-        CreatePlayerServerRpc(Login.currentCookie, id);
+        for (int i = 0; i < playerList.Count; i++)
+        {
+            PlayerData player = new PlayerData();
+
+            player.playerName = playerList[i].playerName;
+            player.entityID = playerList[i].NetworkObjectId;
+            player.connectionid = playerList[i].id;
+
+            playerDataList.Add(player);
+        }
+
+        SendPlayerDataClientRpc(new PlayersData(playerDataList.ToArray()), RpcTarget.Single(rpcParams.Receive.SenderClientId, RpcTargetUse.Temp));
+    }
+
+    [Rpc(SendTo.SpecifiedInParams)]
+    public void SendPlayerDataClientRpc(PlayersData receivingData, RpcParams rpcParams)
+    {
+        var playerArray = receivingData.Players;
+
+        Debug.Log($"Received Data of: {playerArray.Length} Clients!");
+
+        for (int i = 0; i < playerList.Count; i++)
+        {
+            if (!playerList[i].isLocalPlayer)
+            {
+                for (int i1 = 0; i1 < playerArray.Length; i1++)
+                {
+                    if(playerArray[i].entityID == playerList[i].NetworkObjectId)
+                    {
+                        playerList[i].id = playerArray[i].connectionid;
+                        playerList[i].playerName = playerArray[i].playerName;
+                    }
+                }
+            }
+        }
+    }
+
+    private void OnPlayerCompletlyConnectedInternal(ulong id)
+    {
+        NetworkManager.Singleton.OnClientConnectedCallback -= OnPlayerCompletlyConnectedInternal;
+
+        OnPlayerCompletlyConnectedRpc(Login.currentCookie);
     }
     private void OnPlayerDestroyed(Player player, bool ByScene)
     {
@@ -203,13 +321,31 @@ public class ServerManager : NetworkBehaviour
         }
     }
 
+    public Dictionary<ulong, Player> GetPlayerList()
+    {
+        Dictionary<ulong, Player> playerList = new Dictionary<ulong, Player>(this.playerList.Count);
+
+        for (int i = 0; i < this.playerList.Count; i++)
+        {
+            playerList[this.playerList[i].id] = this.playerList[i];
+        }
+
+        return playerList;
+    }
+
+
+
     public void AddPlayer(Player player)
     {
         playerList.Add(player);
+
+        playerIDDictionary = GetPlayerList();
     }
 
     public void RemovePlayer(Player player)
     {
         playerList.Remove(player);
+
+        playerIDDictionary = GetPlayerList();
     }
 }
