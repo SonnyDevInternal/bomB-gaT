@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using Unity.Netcode;
 using Unity.Netcode.Transports.UTP;
 using UnityEngine;
-using UnityEngine.LowLevel;
 using UnityEngine.Networking;
 using UnityEngine.UI;
 
@@ -57,12 +56,16 @@ public class ServerManager : NetworkBehaviour
 
     [SerializeField]
     private GameObject playerPrefab = null;
-
     [SerializeField]
     private GameObject localPlayerPrefab = null;
+    [SerializeField]
+    private GameObject bombPrefab = null;
 
     [SerializeField]
     private GameObject spawnPoint = null;
+
+    [SerializeField]
+    private GameObject deathPosition = null;
 
     [SerializeField]
     private Button HostBtn = null;
@@ -70,9 +73,25 @@ public class ServerManager : NetworkBehaviour
     [SerializeField]
     private Button JoinBtn = null;
 
+    [SerializeField]
+    private Button StartGameBtn = null;
+
+    private BombBehaviour currentBombBehaviour = null;
+
     private float defaultPlayerSpeed = 6.0f;
     private float defaultJumpHeight = 15.0f;
     private float defaultHeadHeight = 1.0f;
+
+    public float defaultBombTimer = 60.0f;
+    public float defaultBombTimerCurrent = 0.0f;
+    public float defaultBombTimerExtender = 0.6f;
+
+    private float passBombReach = 2.0f;
+
+    [SerializeField]
+    private float passBombPushStrength = 50.0f;
+
+    private bool hasGameStarted = false;
 
     private List<Player> playerList = new List<Player>();
     private Dictionary<ulong, Player> playerIDDictionary = new Dictionary<ulong, Player>();
@@ -83,13 +102,20 @@ public class ServerManager : NetworkBehaviour
 
         JoinBtn.onClick.AddListener(this.ClientFindAndConnect);
         HostBtn.onClick.AddListener(this.HostServer);
+        StartGameBtn.onClick.AddListener(this.OnStartGameBtnServerRpc);
+
+        StartGameBtn.gameObject.SetActive(false);
     }
 
     private void OnDestroy()
     {
         base.OnDestroy();
 
-        NetworkManager.Singleton.OnClientConnectedCallback -= HandlePlayerJoin;
+        if(NetworkManager.Singleton)
+            NetworkManager.Singleton.OnClientConnectedCallback -= HandlePlayerJoin;
+
+        if (currentBombBehaviour)
+            currentBombBehaviour.serverManager = null;
     }
 
     private void Update()
@@ -173,8 +199,9 @@ public class ServerManager : NetworkBehaviour
         inst.transform.rotation = localPlayer.transform.rotation;
 
         var localPlayerComp = inst.GetComponent<LocalPlayer>();
+        var playerComp = localPlayer.GetComponent<Player>();
 
-        localPlayerComp.BindNetworkPlayer(localPlayer.GetComponent<Player>());
+        localPlayerComp.BindNetworkPlayer(playerComp);
         localPlayerComp.OnInitializedLocalPlayer();
     }
 
@@ -217,7 +244,6 @@ public class ServerManager : NetworkBehaviour
     [ClientRpc]
     public void ShareNewNameClientRpc(ulong entityID, string newName)
     {
-        Debug.Log("Name is: " + newName);
 
         var obj = GetNetworkObject(entityID);
 
@@ -228,6 +254,7 @@ public class ServerManager : NetworkBehaviour
             if (playerComp)
             {
                 playerComp.playerName = newName;
+                playerComp.SetPlayerNameLabel();
             }
             else
                 Debug.Log("Object didnt have PlayerComponent");
@@ -236,12 +263,63 @@ public class ServerManager : NetworkBehaviour
             Debug.Log("Object id was invalid");
     }
 
+    [ClientRpc]
+    private void OnEndGameBombClientRpc()
+    {
+        currentBombBehaviour = null;
+    }
+
+    [ClientRpc]
+    private void NotifyClientsGameStartClientRpc(ulong ID)
+    {
+        currentBombBehaviour = GetNetworkObject(ID).GetComponent<BombBehaviour>();
+
+        currentBombBehaviour.serverManager = this;
+    }
+
+
+    [ServerRpc]
+    private void OnEndGameServerRpc()
+    {
+        currentBombBehaviour.NetworkObject.Despawn();
+
+        OnEndGameBombClientRpc();
+    }
+
+    [ServerRpc]
+    private void OnStartGameBtnServerRpc()
+    {
+        hasGameStarted = true;
+
+        var instantiatedObj = Instantiate(bombPrefab, Vector3.zero, Quaternion.Euler(Vector3.zero));
+
+        var netObj = instantiatedObj.GetComponent<NetworkObject>();
+
+        var bombComp = netObj.GetComponent<BombBehaviour>();
+
+        bombComp.deathPosition = deathPosition.transform.position;
+
+        bombComp.connectingUsers = this.playerList.Count;
+
+        netObj.Spawn();
+
+        NotifyClientsGameStartClientRpc(netObj.NetworkObjectId);
+
+        //bombComp.ServerActivateBombClientRpc(GetRandomPlayer().id, defaultBombTimer, defaultBombTimerCurrent, defaultBombTimerExtender);
+    }
+
     [Rpc(SendTo.Server)]
     public void OnPlayerCompletlyConnectedRpc(string cookie, RpcParams rpcParams = default)
     {
         ulong id = rpcParams.Receive.SenderClientId;
 
-        var playerList = GetPlayerList();
+        if (playerIDDictionary.ContainsKey(id))
+        {
+            Debug.Log("Player tried Creating an Player Instacnce but Already has an Connected Player Instance!");
+            return;
+        }
+
+        var playerList = GetPlayerDictionary();
 
         if(!playerList.ContainsKey(id))
         {
@@ -250,6 +328,32 @@ public class ServerManager : NetworkBehaviour
         else
         {
             NetworkManager.Singleton.DisconnectClient(id);
+        }
+    }
+
+    [Rpc(SendTo.Server)]
+    public void TryHitPlayersWithBombRpc(RpcParams param = default)
+    {
+        if (!currentBombBehaviour || !currentBombBehaviour.CanBePassed())
+            return;
+
+        var player = FindPlayer(param.Receive.SenderClientId);
+
+        if(player)
+        {
+            var playerTransform = player.transform;
+
+            if(Physics.Raycast(playerTransform.position, playerTransform.forward, out RaycastHit hitInfo, passBombReach))
+            {
+                if(hitInfo.transform.TryGetComponent<Player>(out Player ply))
+                {
+                    ply.SetForceSlidedClientRpc(1.0f);
+
+                    ply.OnNetworkUpdatePositionClientRpc(ply.transform.position, (playerTransform.forward * passBombPushStrength), true);
+
+                    currentBombBehaviour.ServerPassBombToPlayerServerRpc(ply.id);
+                }
+            }
         }
     }
 
@@ -277,8 +381,6 @@ public class ServerManager : NetworkBehaviour
     {
         var playerArray = receivingData.Players;
 
-        Debug.Log($"Received Data of: {playerArray.Length} Clients!");
-
         for (int i = 0; i < playerList.Count; i++)
         {
             if (!playerList[i].isLocalPlayer)
@@ -289,6 +391,8 @@ public class ServerManager : NetworkBehaviour
                     {
                         playerList[i].id = playerArray[i].connectionid;
                         playerList[i].playerName = playerArray[i].playerName;
+
+                        playerList[i].SetPlayerNameLabel();
                     }
                 }
             }
@@ -321,7 +425,38 @@ public class ServerManager : NetworkBehaviour
         }
     }
 
-    public Dictionary<ulong, Player> GetPlayerList()
+    public Player GetRandomPlayer()
+    {
+        Player player = null;
+
+        var currentGameTime = Time.time;
+
+        if (currentGameTime < 12.0f)
+            currentGameTime *= 12.0f;
+
+        var someCalculation = currentGameTime / 6.969f;
+
+        int calc = Mathf.RoundToInt(someCalculation);
+
+        for (int i = 0; i < calc;)
+        {
+            for (int i1 = 0; i1 < playerList.Count; i1++, i++)
+            {
+                if(i + 1 >= calc)
+                {
+                    player = playerList[i1];
+                    i = calc;
+
+                    break;
+                }
+                    
+            }
+        }
+
+        return player;
+    }
+
+    public Dictionary<ulong, Player> GetPlayerDictionary()
     {
         Dictionary<ulong, Player> playerList = new Dictionary<ulong, Player>(this.playerList.Count);
 
@@ -333,19 +468,44 @@ public class ServerManager : NetworkBehaviour
         return playerList;
     }
 
+    public List<Player> GetPlayerList()
+    {
+        return playerList;
+    }
 
+    public Player FindPlayer(ulong id)
+    {
+        Player playerOut = null;
+
+        var playerDictionary = GetPlayerDictionary();
+
+        if (playerDictionary.TryGetValue(id, out Player player))
+        {
+            playerOut = player;
+        }
+
+        return playerOut;
+    }
 
     public void AddPlayer(Player player)
     {
         playerList.Add(player);
 
-        playerIDDictionary = GetPlayerList();
+        playerIDDictionary = GetPlayerDictionary();
+
+        if(playerList.Count >= 2)
+            StartGameBtn.gameObject.SetActive(true);
+        else
+            StartGameBtn.gameObject.SetActive(false);
     }
 
     public void RemovePlayer(Player player)
     {
         playerList.Remove(player);
 
-        playerIDDictionary = GetPlayerList();
+        playerIDDictionary = GetPlayerDictionary();
+
+        if (playerList.Count < 2)
+            StartGameBtn.gameObject.SetActive(false);
     }
 }

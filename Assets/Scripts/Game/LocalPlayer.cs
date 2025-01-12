@@ -1,4 +1,3 @@
-using Unity.Netcode;
 using UnityEngine;
 
 public class LocalPlayer : MonoBehaviour
@@ -9,7 +8,10 @@ public class LocalPlayer : MonoBehaviour
     private Player owningPlayer = null;
     private Camera playerCamera = null;
 
+    private ServerManager manager = null;
+
     private bool hasPlayer = false;
+    private bool mouseLocked = false;
 
     private void Start()
     {
@@ -29,6 +31,21 @@ public class LocalPlayer : MonoBehaviour
     {
         if (!this.hasPlayer)
             return;
+
+        if (Input.GetKeyDown(KeyCode.LeftAlt))
+        {
+            this.mouseLocked = !this.mouseLocked;
+
+            if (this.mouseLocked)
+                Cursor.lockState = CursorLockMode.Locked;
+            else
+                Cursor.lockState = CursorLockMode.None;
+        }
+
+        if (this.mouseLocked == false)
+        {
+            return;
+        }
 
         float translation = Input.GetAxis("Mouse X") * this.CameraRotSpeedX * Time.deltaTime;
         float rotation = -Input.GetAxis("Mouse Y") * this.CameraRotSpeedY * Time.deltaTime;
@@ -52,7 +69,10 @@ public class LocalPlayer : MonoBehaviour
         if (Input.GetKey(KeyCode.Space))
             movement |= Player.PlayerMovement.Up;
 
-        if(rotation != 0.0f)
+        if (Input.GetKeyDown(KeyCode.Mouse0))
+            manager.TryHitPlayersWithBombRpc();
+
+        if (rotation != 0.0f)
         {
             this.playerCamera.transform.Rotate(rotation, 0.0f, 0.0f);
         }
@@ -67,6 +87,20 @@ public class LocalPlayer : MonoBehaviour
         this.owningPlayer.OnClientMoveRpc(movement);
     }
 
+    private void FixedUpdate()
+    {
+        if (!this.hasPlayer && !manager)
+            return;
+
+        var playerList = manager.GetPlayerList();
+
+        for (int i = 0; i < playerList.Count; i++)
+        {
+            if(!playerList[i].isLocalPlayer)
+                playerList[i].UpdatePlayerNameLabel(playerCamera);
+        }
+    }
+
     private void SpectatePlayer()
     {
 
@@ -78,6 +112,8 @@ public class LocalPlayer : MonoBehaviour
         this.hasPlayer = false;
 
         Cursor.lockState = CursorLockMode.None;
+
+        mouseLocked = false;
 
         if (!ByScene)
         {
@@ -102,15 +138,17 @@ public class LocalPlayer : MonoBehaviour
         player.BindOnUpdate(OnPlayerUpdated);
 
         Cursor.lockState = CursorLockMode.Locked;
+
+        mouseLocked = true;
     }
 
     public void OnInitializedLocalPlayer()
     {
         if (this.owningPlayer.serverManager)
         {
-            var serverManager = this.owningPlayer.serverManager.GetComponent<ServerManager>();
+            this.manager = owningPlayer.serverManager.GetComponent<ServerManager>();
 
-            serverManager.GetServerPlayerDataRpc();
+            this.manager.GetServerPlayerDataRpc();
         }
     }
 }

@@ -1,6 +1,6 @@
-using Mono.Cecil;
 using Unity.Netcode;
 using UnityEngine;
+
 
 public class Player : NetworkBehaviour
 {
@@ -20,18 +20,30 @@ public class Player : NetworkBehaviour
     [SerializeField]
     private GameObject head = null;
 
+    [SerializeField]
+    public GameObject bombHand = null;
+
+    [SerializeField]
+    private TMPro.TextMeshPro playerNameLabel = null;
+
     private Rigidbody playerRigidBody = null;
     private CapsuleCollider playerCapsuleCollider = null;
 
     private bool isGrounded = false;
-    private bool receivedJoiningData = false;
+    private bool isForcedSliding = false;
+
+    private float forceSlideTime = 2.0f;
+    private float forceSlideTimeCurrent = 0.0f;
+
+    private float playerDrag = 0.0f;
+
+    private bool canMove = true;
+    private bool canJump = true;
 
     public bool isLocalPlayer = false;
 
     public string playerName = "";
     public ulong id = 0; // Connection id this Player belongs to
-
-    private float movementDrag = 6.0f;
 
     [SerializeField]
     private float gravity = 2.0f;
@@ -54,7 +66,25 @@ public class Player : NetworkBehaviour
 
     private void Update()
     {
-        isGrounded = Physics.Raycast(transform.position, -transform.up, playerCapsuleCollider.height / 1.9f);
+        isGrounded = Physics.Raycast(transform.position, -transform.up, (playerCapsuleCollider.height / 2.0f) + 0.05f);
+
+        if(IsHost)
+        {
+            if(isForcedSliding)
+            {
+                if (forceSlideTimeCurrent >= forceSlideTime)
+                {
+                    forceSlideTimeCurrent = 0.0f;
+                    isForcedSliding = false;
+
+                    canMove = true;
+
+                    this.playerRigidBody.linearDamping = this.playerDrag;
+                }
+                else
+                    forceSlideTimeCurrent += Time.deltaTime;
+            }
+        }
     }
 
     public void BindOnUpdate(OnUpdatePlayer onUpdateValue) {this.onUpdatePlayer = onUpdateValue;}
@@ -98,6 +128,65 @@ public class Player : NetworkBehaviour
     public void OnNetworkUpdateRotationClientRpc(Vector3 rotation)
     {
         this.transform.Rotate(rotation);
+    }
+
+    [ClientRpc]
+    public void KillPlayerClientRpc()
+    {
+        if(this.onDestroyPlayer != null)
+        {
+            this.onDestroyPlayer(this, false);
+
+            this.onDestroyPlayer = null;
+        }
+    }
+
+    [ClientRpc]
+    public void SetCanMoveClientRpc(bool canMove)
+    {
+        this.canMove = canMove;
+
+        if(canMove)
+            this.playerRigidBody.isKinematic = false;
+        else
+            this.playerRigidBody.isKinematic = true;
+    }
+
+    [ClientRpc]
+    public void SetForceSlidedClientRpc(float seconds)
+    {
+        this.forceSlideTime = seconds;
+        this.forceSlideTimeCurrent = 0.0f;
+
+        this.isForcedSliding = true;
+
+        this.canMove = false;
+
+        this.playerDrag = this.playerRigidBody.linearDamping;
+
+        this.playerRigidBody.linearDamping = 0.01f;
+    }
+
+    [ServerRpc]
+    public void SetCanMoveServerRpc(bool canMove)
+    {
+        this.canMove = canMove;
+
+        if(canMove)
+            this.playerRigidBody.isKinematic = false;
+        else
+            this.playerRigidBody.isKinematic = true;
+    }
+
+    [ServerRpc]
+    public void SetPositionServerRpc(Vector3 position)
+    {
+        if(this.playerRigidBody.isKinematic)
+            transform.position = position;
+        else
+            this.playerRigidBody.position = position;
+
+        OnNetworkUpdatePositionClientRpc(position, Vector3.zero);
     }
 
     [ServerRpc]
@@ -179,15 +268,61 @@ public class Player : NetworkBehaviour
     }
 
     [Rpc(SendTo.Server)]
-    public void OnClientMoveRpc(Player.PlayerMovement movement)
+    public void OnClientMoveRpc(Player.PlayerMovement movement, RpcParams rpcParams = default)
     {
+        if (CheckAuthority(rpcParams) == false || !canMove)
+            return; //Unauthorized Call!
+
         OnMoveCharacterServerRpc(movement);
     }
 
     [Rpc(SendTo.Server)]
-    public void OnClientRotateRpc(Vector3 addValue)
+    public void OnClientRotateRpc(Vector3 addValue, RpcParams rpcParams = default)
     {
+        if (CheckAuthority(rpcParams) == false || !canMove)
+            return; //Unauthorized Call!
+
         OnRotateCharacterServerRpc(addValue);
+    }
+
+    public void SetPlayerNameLabel()
+    {
+        if(playerNameLabel != null && !string.IsNullOrEmpty(playerName))
+        {
+            playerNameLabel.text = playerName;
+        }
+    }
+
+    public void UpdatePlayerNameLabel(Camera camera)
+    {
+        if (camera && playerNameLabel != null)
+        {
+            var lableTransform = playerNameLabel.transform;
+            var cameraTransform = camera.transform;
+
+            var lookDirection = lableTransform.position - cameraTransform.position;
+
+            lookDirection.y = 0.0f;
+
+            Quaternion rotation = lableTransform.rotation;
+
+            rotation.SetLookRotation(lookDirection);
+
+            lableTransform.rotation = rotation;
+        }
+    }
+
+    private bool CheckAuthority(RpcParams rpcParams)
+    {
+        var SenderID = rpcParams.Receive.SenderClientId;
+
+        if (SenderID != id)
+        {
+            Debug.Log($"Player with ID: {SenderID}, tried Executing unauthorized Code");
+            return false;
+        }
+
+        return true;
     }
 
     private void OnDestroy()
