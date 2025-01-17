@@ -15,6 +15,15 @@ public class Player : NetworkBehaviour
         Down = 1 << 6,
     }
 
+    public enum VelocityUpdate
+    {
+        None,
+        Forward = 1 << 1,
+        Right = 1 << 2,
+        Up = 1 << 3,
+        ForwardRight = Forward | Right,
+    }
+
     public GameObject serverManager = null;
 
     [SerializeField]
@@ -35,7 +44,8 @@ public class Player : NetworkBehaviour
     private float forceSlideTime = 2.0f;
     private float forceSlideTimeCurrent = 0.0f;
 
-    private float playerDrag = 0.0f;
+    public float playerDrag = 3.0f;
+    public float terminalVelocity = 30.0f;
 
     private bool canMove = true;
     private bool canJump = true;
@@ -66,12 +76,22 @@ public class Player : NetworkBehaviour
 
     private void Update()
     {
-        isGrounded = Physics.Raycast(transform.position, -transform.up, (playerCapsuleCollider.height / 2.0f) + 0.05f);
+        isGrounded = Physics.BoxCast(
+        transform.position,
+        new Vector3(playerCapsuleCollider.radius, 0.05f, playerCapsuleCollider.radius),
+        -transform.up,
+        Quaternion.identity,
+        (playerCapsuleCollider.height / 2.0f) + 0.05f,
+        ~0,
+        QueryTriggerInteraction.Ignore);
 
-        if(IsHost)
+
+        if (IsHost)
         {
-            if(isForcedSliding)
+
+            if (isForcedSliding)
             {
+
                 if (forceSlideTimeCurrent >= forceSlideTime)
                 {
                     forceSlideTimeCurrent = 0.0f;
@@ -83,6 +103,10 @@ public class Player : NetworkBehaviour
                 }
                 else
                     forceSlideTimeCurrent += Time.deltaTime;
+            }
+            else
+            {
+                this.OnNetworkUpdatePositionClientRpc(transform.position, Vector3.zero, VelocityUpdate.None);
             }
         }
     }
@@ -110,14 +134,88 @@ public class Player : NetworkBehaviour
     }
 
     [ClientRpc]
-    public void OnNetworkUpdatePositionClientRpc(Vector3 position, Vector3 velocity, bool updateVelocity = false)
+    public void OnNetworkUpdatePositionClientRpc(Vector3 position, Vector3 velocity, VelocityUpdate update = VelocityUpdate.None)
     {
         if(this.playerRigidBody)
         {
             this.playerRigidBody.position = position;
 
-            if(updateVelocity)
-                this.playerRigidBody.linearVelocity = new Vector3(velocity.x, velocity.y, velocity.z);
+            if(update != VelocityUpdate.None)
+            {
+                var velocityCopy = this.playerRigidBody.linearVelocity;
+
+                Vector3 targetVelocity = new Vector3();
+
+                if ((update & VelocityUpdate.Forward) == VelocityUpdate.Forward)
+                    targetVelocity.x = velocity.x;
+                else
+                    targetVelocity.x = velocityCopy.x;
+
+                if ((update & VelocityUpdate.Up) == VelocityUpdate.Up)
+                    targetVelocity.y = velocity.y;
+                else
+                    targetVelocity.y = velocityCopy.y;
+
+                if ((update & VelocityUpdate.Right) == VelocityUpdate.Right)
+                    targetVelocity.z = velocity.z;
+                else
+                    targetVelocity.z = velocityCopy.z;
+
+                this.playerRigidBody.linearVelocity = targetVelocity;
+            }
+
+            if(gravity >  0.0f && !isGrounded)
+            {
+                var velocityCopy = this.playerRigidBody.linearVelocity;
+
+                if(velocityCopy.y > -terminalVelocity)
+                {
+                    velocityCopy.y -= gravity;
+
+                    if(velocityCopy.y < -terminalVelocity)
+                        velocityCopy.y = -terminalVelocity;
+
+                    this.playerRigidBody.linearVelocity = velocityCopy;
+                }
+            }
+
+            if (playerDrag > 0.0f && isGrounded)
+            {
+                bool changedVelocity = false;
+
+                Vector3 localVelocity = transform.InverseTransformDirection(this.playerRigidBody.linearVelocity);
+
+                if (localVelocity.x > 0.0f)
+                {
+                    localVelocity.x -= playerDrag * Time.deltaTime;
+                    if (localVelocity.x < 0.0f) localVelocity.x = 0.0f;
+                    changedVelocity = true;
+                }
+                else if (localVelocity.x < 0.0f)
+                {
+                    localVelocity.x += playerDrag * Time.deltaTime;
+                    if (localVelocity.x > 0.0f) localVelocity.x = 0.0f;
+                    changedVelocity = true;
+                }
+
+                if (localVelocity.z > 0.0f)
+                {
+                    localVelocity.z -= playerDrag * Time.deltaTime;
+                    if (localVelocity.z < 0.0f) localVelocity.z = 0.0f;
+                    changedVelocity = true;
+                }
+                else if (localVelocity.z < 0.0f)
+                {
+                    localVelocity.z += playerDrag * Time.deltaTime;
+                    if (localVelocity.z > 0.0f) localVelocity.z = 0.0f;
+                    changedVelocity = true;
+                }
+
+                if (changedVelocity)
+                    this.playerRigidBody.linearVelocity = transform.TransformDirection(localVelocity);
+            }
+
+
 
             if (onUpdatePlayer != null)
                 onUpdatePlayer(this);
@@ -198,73 +296,72 @@ public class Player : NetworkBehaviour
     [ServerRpc]
     public void OnMoveCharacterServerRpc(PlayerMovement movingDir, ServerRpcParams param = default)
     {
-        if(IsHost)
+        if (movingDir == PlayerMovement.None)
+            return;
+
+        VelocityUpdate velocityState = VelocityUpdate.ForwardRight;
+
+        Vector3 currentPosition = transform.position;
+
+        Vector3 nextPosition = currentPosition;
+
+        if ((movingDir & PlayerMovement.Forward) == PlayerMovement.Forward)
         {
-            float deltaTime = Time.deltaTime;
+            Vector3 fw = transform.forward;
 
-            Vector3 currentPosition = transform.position;
-
-            Vector3 nextPosition = currentPosition;
-
-            nextPosition.y -= gravity;
-
-            if ((movingDir & PlayerMovement.Forward) == PlayerMovement.Forward)
-            {
-                Vector3 fw = transform.forward;
-
-                nextPosition.x += (fw.x * movementSpeed);
-                nextPosition.z += (fw.z * movementSpeed);
-            }
-
-            if ((movingDir & PlayerMovement.Backward) == PlayerMovement.Backward)
-            {
-                Vector3 fw = transform.forward;
-
-                nextPosition.x -= (fw.x * movementSpeed);
-                nextPosition.z -= (fw.z * movementSpeed);
-            }
-
-            if ((movingDir & PlayerMovement.Right) == PlayerMovement.Right)
-            {
-                Vector3 r = transform.right;
-
-                nextPosition.x += (r.x * movementSpeed);
-                nextPosition.z += (r.z * movementSpeed);
-            }
-
-            if ((movingDir & PlayerMovement.Left) == PlayerMovement.Left)
-            {
-                Vector3 r = transform.right;
-
-                nextPosition.x -= (r.x * movementSpeed);
-                nextPosition.z -= (r.z * movementSpeed);
-            }
-
-            if ((movingDir & PlayerMovement.Up) == PlayerMovement.Up)
-            {
-                if (isGrounded)
-                {
-                    Vector3 up = transform.up;
-
-                    nextPosition.y += (up.y * jumpHeight);
-                }
-            }
-
-            if ((movingDir & PlayerMovement.Down) == PlayerMovement.Down)
-            {
-                if (!isGrounded)
-                {
-                    Vector3 up = transform.up;
-
-                    nextPosition.y -= (up.y * jumpHeight);
-                }
-            }
-
-            bool isMoving = !(movingDir == PlayerMovement.None);
-
-
-            this.OnNetworkUpdatePositionClientRpc(this.playerRigidBody.position, (nextPosition - currentPosition), true);
+            nextPosition.x += (fw.x * movementSpeed);
+            nextPosition.z += (fw.z * movementSpeed);
         }
+
+        if ((movingDir & PlayerMovement.Backward) == PlayerMovement.Backward)
+        {
+            Vector3 fw = transform.forward;
+
+            nextPosition.x -= (fw.x * movementSpeed);
+            nextPosition.z -= (fw.z * movementSpeed);
+        }
+
+        if ((movingDir & PlayerMovement.Right) == PlayerMovement.Right)
+        {
+            Vector3 r = transform.right;
+
+            nextPosition.x += (r.x * movementSpeed);
+            nextPosition.z += (r.z * movementSpeed);
+        }
+
+        if ((movingDir & PlayerMovement.Left) == PlayerMovement.Left)
+        {
+            Vector3 r = transform.right;
+
+            nextPosition.x -= (r.x * movementSpeed);
+            nextPosition.z -= (r.z * movementSpeed);
+        }
+
+        if ((movingDir & PlayerMovement.Up) == PlayerMovement.Up)
+        {
+            if (isGrounded && canJump)
+            {
+                Vector3 up = transform.up;
+
+                nextPosition.y += (up.y * jumpHeight);
+
+                velocityState |= VelocityUpdate.Up;
+            }
+        }
+
+        if ((movingDir & PlayerMovement.Down) == PlayerMovement.Down)
+        {
+            if (!isGrounded)
+            {
+                Vector3 up = transform.up;
+
+                nextPosition.y -= (up.y * jumpHeight);
+
+                velocityState |= VelocityUpdate.Up;
+            }
+        }
+
+        this.OnNetworkUpdatePositionClientRpc(currentPosition, (nextPosition - currentPosition), velocityState);
     }
 
     [Rpc(SendTo.Server)]
@@ -337,10 +434,7 @@ public class Player : NetworkBehaviour
 
     private void FixedUpdate()
     {
-        if(IsHost)
-        {
-            this.OnNetworkUpdatePositionClientRpc(playerRigidBody.position, Vector3.zero);
-        }
+
     }
 
 

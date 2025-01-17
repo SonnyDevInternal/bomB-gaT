@@ -89,7 +89,7 @@ public class ServerManager : NetworkBehaviour
     private float passBombReach = 2.0f;
 
     [SerializeField]
-    private float passBombPushStrength = 50.0f;
+    private float passBombPushStrength = 10.0f;
 
     private bool hasGameStarted = false;
 
@@ -349,7 +349,9 @@ public class ServerManager : NetworkBehaviour
                 {
                     ply.SetForceSlidedClientRpc(1.0f);
 
-                    ply.OnNetworkUpdatePositionClientRpc(ply.transform.position, (playerTransform.forward * passBombPushStrength), true);
+                    Player.VelocityUpdate velocityUpdate = Player.VelocityUpdate.Forward | Player.VelocityUpdate.Right;
+
+                    ply.OnNetworkUpdatePositionClientRpc(ply.transform.position, (playerTransform.forward * passBombPushStrength), velocityUpdate);
 
                     currentBombBehaviour.ServerPassBombToPlayerServerRpc(ply.id);
                 }
