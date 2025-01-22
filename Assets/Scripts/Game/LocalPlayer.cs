@@ -55,7 +55,13 @@ public class LocalPlayer : MonoBehaviour
         Player.PlayerMovement movement = Player.PlayerMovement.None;
 
         if (Input.GetKey(KeyCode.W))
-            movement |= Player.PlayerMovement.Forward;
+        {
+            if(Input.GetKey(KeyCode.LeftShift))
+                movement |= Player.PlayerMovement.FastForward;
+            else
+                movement |= Player.PlayerMovement.Forward;
+        }
+            
 
         if (Input.GetKey(KeyCode.S))
             movement |= Player.PlayerMovement.Backward;

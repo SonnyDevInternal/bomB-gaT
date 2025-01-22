@@ -1,6 +1,15 @@
 using Unity.Netcode;
 using UnityEngine;
 
+struct PlayerUpdateData
+{
+    public float stamina;
+
+    public bool isRunning;
+    public bool isDead;
+    public bool isJumping;
+    public bool hasBomb;
+}
 
 public class Player : NetworkBehaviour
 {
@@ -13,6 +22,9 @@ public class Player : NetworkBehaviour
         Left = 1 << 4,
         Up = 1 << 5,
         Down = 1 << 6,
+        FastForward = 1 << 7, //running
+
+        All = Forward | Backward | Right | Left | Up | Down | FastForward,
     }
 
     public enum VelocityUpdate
@@ -51,15 +63,25 @@ public class Player : NetworkBehaviour
     private bool canJump = true;
 
     public bool isLocalPlayer = false;
+    public bool isAlive = true;
 
     public string playerName = "";
     public ulong id = 0; // Connection id this Player belongs to
 
-    [SerializeField]
-    private float gravity = 2.0f;
+    public float gravity = 2.0f;
 
+    public float runningSpeed = 14.0f;
     public float movementSpeed = 6.0f; // can only be changed by Server
     public float jumpHeight = 4.0f; // can only be changed by Server
+
+    public float maxStamina = 100.0f;
+
+    public float regenStaminaAmount = 10.0f;
+    public float degenStaminaAmount = 20.0f;
+
+    private float timeSinceWalking = 0.0f;
+    [SerializeField]
+    private float currentStamina = 0.0f;
 
     public delegate void OnUpdatePlayer(Player _this);
     public delegate void OnDestroyPlayer(Player _this, bool ByScene);
@@ -98,8 +120,6 @@ public class Player : NetworkBehaviour
                     isForcedSliding = false;
 
                     canMove = true;
-
-                    this.playerRigidBody.linearDamping = this.playerDrag;
                 }
                 else
                     forceSlideTimeCurrent += Time.deltaTime;
@@ -179,7 +199,7 @@ public class Player : NetworkBehaviour
                 }
             }
 
-            if (playerDrag > 0.0f && isGrounded)
+            if (playerDrag > 0.0f && CanPerformDrag())
             {
                 bool changedVelocity = false;
 
@@ -259,10 +279,6 @@ public class Player : NetworkBehaviour
         this.isForcedSliding = true;
 
         this.canMove = false;
-
-        this.playerDrag = this.playerRigidBody.linearDamping;
-
-        this.playerRigidBody.linearDamping = 0.01f;
     }
 
     [ServerRpc]
@@ -305,16 +321,46 @@ public class Player : NetworkBehaviour
 
         Vector3 nextPosition = currentPosition;
 
+        bool usingMoveFlag = false;
+
         if ((movingDir & PlayerMovement.Forward) == PlayerMovement.Forward)
         {
+            
+
             Vector3 fw = transform.forward;
 
             nextPosition.x += (fw.x * movementSpeed);
             nextPosition.z += (fw.z * movementSpeed);
         }
+        else if((movingDir & PlayerMovement.FastForward) == PlayerMovement.FastForward)
+        {
+            
+
+            Vector3 fw = transform.forward;
+
+            timeSinceWalking = 0.0f;
+
+            if(currentStamina > 0.0f)
+            {
+                currentStamina -= (degenStaminaAmount * Time.deltaTime);
+
+                if(currentStamina < 0.0f)
+                    currentStamina = 0.0f;
+
+                nextPosition.x += (fw.x * runningSpeed);
+                nextPosition.z += (fw.z * runningSpeed);
+            }
+            else
+            {
+                nextPosition.x += (fw.x * movementSpeed);
+                nextPosition.z += (fw.z * movementSpeed);
+            }
+        }
 
         if ((movingDir & PlayerMovement.Backward) == PlayerMovement.Backward)
         {
+            
+
             Vector3 fw = transform.forward;
 
             nextPosition.x -= (fw.x * movementSpeed);
@@ -323,6 +369,8 @@ public class Player : NetworkBehaviour
 
         if ((movingDir & PlayerMovement.Right) == PlayerMovement.Right)
         {
+            
+
             Vector3 r = transform.right;
 
             nextPosition.x += (r.x * movementSpeed);
@@ -331,6 +379,8 @@ public class Player : NetworkBehaviour
 
         if ((movingDir & PlayerMovement.Left) == PlayerMovement.Left)
         {
+            
+
             Vector3 r = transform.right;
 
             nextPosition.x -= (r.x * movementSpeed);
@@ -422,6 +472,11 @@ public class Player : NetworkBehaviour
         return true;
     }
 
+    private bool CanPerformDrag()
+    {
+        return !isForcedSliding;
+    }
+
     private void OnDestroy()
     {
         if (serverManager)
@@ -434,9 +489,19 @@ public class Player : NetworkBehaviour
 
     private void FixedUpdate()
     {
+        if (timeSinceWalking >= 2.0f)
+        {
+            if(currentStamina < maxStamina)
+            {
+                currentStamina += (regenStaminaAmount * Time.deltaTime);
 
+                if (currentStamina > maxStamina)
+                    currentStamina = maxStamina;
+            }
+        }
+        else
+            timeSinceWalking += Time.deltaTime;
     }
-
 
     private void Initialize()
     {

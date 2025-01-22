@@ -79,12 +79,21 @@ public class ServerManager : NetworkBehaviour
     private BombBehaviour currentBombBehaviour = null;
 
     private float defaultPlayerSpeed = 6.0f;
+    private float defaultPlayerRunningSpeed = 14.0f;
     private float defaultJumpHeight = 15.0f;
+    private float defaultTerminalVelocity = 30.0f;
+    private float defaultPlayerDrag = 40.0f;
+    private float defaultPlayerGravity = 0.1f;
+
+    private float defaultDegenStamina = 20.0f;
+    private float defaultRegenStamina = 10.0f;
+    private float defaultMaxStamina = 100.0f;
+
     private float defaultHeadHeight = 1.0f;
 
-    public float defaultBombTimer = 60.0f;
+    public float defaultBombTimer = 30.0f;
     public float defaultBombTimerCurrent = 0.0f;
-    public float defaultBombTimerExtender = 0.6f;
+    public float defaultBombTimerExtender = 0.0f;
 
     private float passBombReach = 2.0f;
 
@@ -165,6 +174,14 @@ public class ServerManager : NetworkBehaviour
 
             playerComp.jumpHeight = defaultJumpHeight;
             playerComp.movementSpeed = defaultPlayerSpeed;
+
+            playerComp.degenStaminaAmount = defaultDegenStamina;
+            playerComp.gravity = defaultPlayerGravity;
+            playerComp.playerDrag = defaultPlayerDrag;
+            playerComp.regenStaminaAmount = defaultRegenStamina;
+            playerComp.runningSpeed = defaultPlayerRunningSpeed;
+            playerComp.maxStamina = defaultMaxStamina;
+            playerComp.terminalVelocity = defaultTerminalVelocity;
 
             if (connectionID != 0)
             {

@@ -41,6 +41,7 @@ public class ServerObject : NetworkBehaviour
     protected Transform owningTransform = null;
 
     private bool isUsingRigidBody = false;
+    private bool useClient = false; // set true to update the position through other stuff
 
     void Start()
     {
@@ -56,9 +57,14 @@ public class ServerObject : NetworkBehaviour
 
     void Update()
     {
+        bool ishost = IsHost;
+
+        if (ishost && this.useClient)
+            return;
+
         OnUpdate();
 
-        if (IsHost)
+        if (ishost)
         {
             ServerUpdateObjectServerRpc();
         }
@@ -132,6 +138,11 @@ public class ServerObject : NetworkBehaviour
         {
             transform.position = obj.Position;
         }
+    }
+
+    public void ObjectUseNonServerPos(bool value)
+    {
+        this.useClient = value;
     }
 
     public bool isKinematic()

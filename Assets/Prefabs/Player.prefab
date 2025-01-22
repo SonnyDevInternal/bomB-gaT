@@ -333,9 +333,13 @@ MonoBehaviour:
   isLocalPlayer: 0
   playerName: 
   id: 0
-  gravity: 0.4
-  movementSpeed: 10
-  jumpHeight: 26
+  gravity: 0.1
+  runningSpeed: 14
+  movementSpeed: 6
+  jumpHeight: 15
+  maxStamina: 100
+  regenStaminaAmount: 10
+  degenStaminaAmount: 20
 --- !u!1 &5183790463045858930
 GameObject:
   m_ObjectHideFlags: 0

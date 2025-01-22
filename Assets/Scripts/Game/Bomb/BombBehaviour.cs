@@ -11,6 +11,9 @@ public class BombBehaviour : ServerObject
 
     public Collider collider = null;
 
+    [SerializeField]
+    private TMPro.TextMeshPro EndGameText = null;
+
     private bool hasExploded = false;
     private bool hasActivatedBomb = false;
 
@@ -25,6 +28,8 @@ public class BombBehaviour : ServerObject
     private float detonationTimerExtender = 0.6f;
 
     private List<ulong> connectedUsers = new List<ulong>();
+    private List<ulong> aliveUsers = null;
+
     public int connectingUsers = 0;
 
     public override void OnNetworkSpawn()
@@ -50,15 +55,7 @@ public class BombBehaviour : ServerObject
                 {
                     detonationTimerCurrent = 0.0f;
 
-                    owningPlayer.SetCanMoveServerRpc(false);
-
-                    owningPlayer.SetPositionServerRpc(deathPosition);
-
-                    owningPlayer = null;
-
-                    ServerExplodeBombClientRpc();
-
-                    NetworkObject.Despawn();
+                    OnPlayerDie_ServerRpc();
                 }
                 else
                 {
@@ -116,14 +113,9 @@ public class BombBehaviour : ServerObject
         this.detonationTimerCurrent = detonationTimerCurrent;
         this.detonationTimerExtender = detonationTimerExtender;
 
-        owningPlayer = serverManager.FindPlayer(IDToGive);
+        ObjectUseNonServerPos(true);
 
-        var colliders = GetComponentsInChildren<Collider>();
-
-        for (int i = 0; i < colliders.Length; i++)
-        {
-            colliders[i].enabled = false;
-        }
+        SetBombColliders(false);
     }
 
     [ClientRpc]
@@ -139,11 +131,43 @@ public class BombBehaviour : ServerObject
 
         if (percentage > 0.86f)
         {
-            detonationTimerCurrent += this.detonationTimerExtender;
+            detonationTimerCurrent -= this.detonationTimerExtender;
         }
+
+        owningPlayer = serverManager.FindPlayer(PlayerID);
+        transform.parent = owningPlayer.transform;
 
         UpdateBombTimerClientRpc(detonationTimerCurrent);
         ClientPassBombClientRpc(PlayerID);
+    }
+
+    [ServerRpc]
+    public void OnPlayerDie_ServerRpc()
+    {
+        owningPlayer.SetCanMoveServerRpc(false);
+
+        owningPlayer.SetPositionServerRpc(deathPosition);
+
+        aliveUsers.Remove(owningPlayer.id);
+
+        ServerExplodeBombClientRpc();
+
+        if (aliveUsers.Count > 0)
+        {
+            float perc = (aliveUsers.Count / connectedUsers.Count);
+
+            detonationTimerCurrent = (detonationTimer * perc) + 2.0f;
+
+            ServerPassBombToPlayerServerRpc(this.GetRandomPlayerID());
+        }
+        else
+            OnGameEnd_ServerRpc();
+    }
+
+    [ServerRpc]
+    public void OnGameEnd_ServerRpc()
+    {
+
     }
 
     [Rpc(SendTo.Server)]
@@ -172,8 +196,51 @@ public class BombBehaviour : ServerObject
             {
                 Debug.Log("All Clients Loaded, Game Starting!");
 
+                aliveUsers = new List<ulong>(connectedUsers);
+
                 ServerActivateBombClientRpc(serverManager.GetRandomPlayer().id, serverManager.defaultBombTimer, serverManager.defaultBombTimerCurrent, serverManager.defaultBombTimerExtender);
             }
         }
+    }
+
+    private void SetBombColliders(bool active)
+    {
+        var colliders = GetComponentsInChildren<Collider>();
+
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            colliders[i].enabled = active;
+        }
+    }
+
+    public ulong GetRandomPlayerID()
+    {
+        ulong player = 0;
+
+        var currentGameTime = Time.time;
+
+        if (currentGameTime < 12.0f)
+            currentGameTime *= 12.0f;
+
+        var someCalculation = currentGameTime / 6.969f;
+
+        int calc = Mathf.RoundToInt(someCalculation);
+
+        for (int i = 0; i < calc;)
+        {
+            for (int i1 = 0; i1 < aliveUsers.Count; i1++, i++)
+            {
+                if (i + 1 >= calc)
+                {
+                    player = aliveUsers[i1];
+                    i = calc;
+
+                    break;
+                }
+
+            }
+        }
+
+        return player;
     }
 }
