@@ -798,9 +798,7 @@ MonoBehaviour:
   HostBtn: {fileID: 1012148361}
   JoinBtn: {fileID: 1977136318}
   StartGameBtn: {fileID: 285767773}
-  defaultBombTimer: 60
-  defaultBombTimerCurrent: 0
-  defaultBombTimerExtender: 0.6
+  BombTimer: {fileID: 0}
   passBombPushStrength: 50
 --- !u!1 &647051271
 GameObject:

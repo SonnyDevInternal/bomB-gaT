@@ -92,12 +92,11 @@ public class ServerObject : NetworkBehaviour
     }
 
     [ServerRpc]
-    public void SetUseRigidBodyServerRpc(bool userRigidBody)
+    public void SetUseRigidBody_ServerRpc(bool userRigidBody)
     {
         this.isUsingRigidBody = userRigidBody;
 
         SetUseRigidBodyClientRpc(userRigidBody);
-        ServerUpdateObjectServerRpc();
     }
 
     [ServerRpc]
@@ -123,6 +122,12 @@ public class ServerObject : NetworkBehaviour
         ServerUpdateObjectClientRpc(obj);
     }
 
+    [ServerRpc]
+    public void ObjectUseNonServerPos_ServerRpc(bool value)
+    {
+        this.useClient = value;
+    }
+
     [ClientRpc]
     public void ServerUpdateObjectClientRpc(ServerObjectData obj)
     {
@@ -138,11 +143,6 @@ public class ServerObject : NetworkBehaviour
         {
             transform.position = obj.Position;
         }
-    }
-
-    public void ObjectUseNonServerPos(bool value)
-    {
-        this.useClient = value;
     }
 
     public bool isKinematic()

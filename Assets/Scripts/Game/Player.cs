@@ -1,14 +1,35 @@
+using static Assets.Scripts.DebugClass;
+
 using Unity.Netcode;
 using UnityEngine;
+using Assets.Scripts;
+using UnityEngine.UIElements;
 
-struct PlayerUpdateData
+struct PlayerUpdateData : INetworkSerializable
 {
-    public float stamina;
+    public Vector3 position;
+    public Vector3 velocity;
 
-    public bool isRunning;
+    public float stamina;
     public bool isDead;
-    public bool isJumping;
-    public bool hasBomb;
+
+    public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
+    {
+        if (serializer.IsReader)
+        {
+            serializer.SerializeValue(ref position);
+            serializer.SerializeValue(ref velocity);
+            serializer.SerializeValue(ref stamina);
+            serializer.SerializeValue(ref isDead);
+        }
+        else
+        {
+            serializer.SerializeValue(ref position);
+            serializer.SerializeValue(ref velocity);
+            serializer.SerializeValue(ref stamina);
+            serializer.SerializeValue(ref isDead);
+        }
+    }
 }
 
 public class Player : NetworkBehaviour
@@ -61,14 +82,17 @@ public class Player : NetworkBehaviour
 
     private bool canMove = true;
     private bool canJump = true;
+    private bool canRotate = true;
 
     public bool isLocalPlayer = false;
     public bool isAlive = true;
 
+    private bool isMovementHooked = false;
+
     public string playerName = "";
     public ulong id = 0; // Connection id this Player belongs to
 
-    public float gravity = 2.0f;
+    public float gravity = 9.8f;
 
     public float runningSpeed = 14.0f;
     public float movementSpeed = 6.0f; // can only be changed by Server
@@ -85,9 +109,11 @@ public class Player : NetworkBehaviour
 
     public delegate void OnUpdatePlayer(Player _this);
     public delegate void OnDestroyPlayer(Player _this, bool ByScene);
+    public delegate PlayerMovement OnMovePlayerHook(Player _this, PlayerMovement originalMovement);
 
-    private OnUpdatePlayer onUpdatePlayer;
-    private OnDestroyPlayer onDestroyPlayer;
+    private OnUpdatePlayer onUpdatePlayer = null;
+    private OnDestroyPlayer onDestroyPlayer = null;
+    private OnMovePlayerHook onMovePlayerHook = null;
 
 
     private void Start()
@@ -110,6 +136,18 @@ public class Player : NetworkBehaviour
 
         if (IsHost)
         {
+            if (timeSinceWalking >= 2.0f)
+            {
+                if (currentStamina < maxStamina)
+                {
+                    currentStamina += (regenStaminaAmount * Time.deltaTime);
+
+                    if (currentStamina > maxStamina)
+                        currentStamina = maxStamina;
+                }
+            }
+            else
+                timeSinceWalking += Time.deltaTime;
 
             if (isForcedSliding)
             {
@@ -126,15 +164,21 @@ public class Player : NetworkBehaviour
             }
             else
             {
-                this.OnNetworkUpdatePositionClientRpc(transform.position, Vector3.zero, VelocityUpdate.None);
+                this.UpdatePlayerGravity_ServerRpc();
+
+                OnNetworkUpdateData_ClientRpc(CraftPlayerUpdateData());
             }
         }
     }
 
     public void BindOnUpdate(OnUpdatePlayer onUpdateValue) {this.onUpdatePlayer = onUpdateValue;}
     public void BindOnDestroy(OnDestroyPlayer onDestroyValue) {this.onDestroyPlayer = onDestroyValue;}
+    public void HookOnMovePlayer(OnMovePlayerHook onMovePlayerHook) { this.isMovementHooked = true; this.onMovePlayerHook = onMovePlayerHook;}
+
     public void UnbindOnDestroy() { this.onDestroyPlayer = null; }
     public void UnbindOnUpdate() { this.onUpdatePlayer = null; }
+
+    public void UnhookOnMovePlayer() { this.isMovementHooked = false; this.onMovePlayerHook = null; }
 
     public override void OnNetworkSpawn()
     {
@@ -153,8 +197,69 @@ public class Player : NetworkBehaviour
             onDestroyPlayer(this, false);
     }
 
-    [ClientRpc]
-    public void OnNetworkUpdatePositionClientRpc(Vector3 position, Vector3 velocity, VelocityUpdate update = VelocityUpdate.None)
+    [ServerRpc]
+    private void UpdatePlayerGravity_ServerRpc()
+    {
+        if (gravity > 0.0f && !isGrounded)
+        {
+            var velocityCopy = this.playerRigidBody.linearVelocity;
+
+            if (velocityCopy.y > -terminalVelocity)
+            {
+                velocityCopy.y -= (gravity * Time.deltaTime);
+
+                if (velocityCopy.y < -terminalVelocity)
+                    velocityCopy.y = -terminalVelocity;
+
+                this.playerRigidBody.linearVelocity = velocityCopy;
+            }
+        }
+
+        if (playerDrag > 0.0f && CanPerformDrag())
+        {
+            bool changedVelocity = false;
+
+            Vector3 localVelocity = transform.InverseTransformDirection(this.playerRigidBody.linearVelocity);
+
+            if (localVelocity.x > 0.0f)
+            {
+                localVelocity.x -= playerDrag * Time.deltaTime;
+                if (localVelocity.x < 0.0f) localVelocity.x = 0.0f;
+                changedVelocity = true;
+            }
+            else if (localVelocity.x < 0.0f)
+            {
+                localVelocity.x += playerDrag * Time.deltaTime;
+                if (localVelocity.x > 0.0f) localVelocity.x = 0.0f;
+                changedVelocity = true;
+            }
+
+            if (localVelocity.z > 0.0f)
+            {
+                localVelocity.z -= playerDrag * Time.deltaTime;
+                if (localVelocity.z < 0.0f) localVelocity.z = 0.0f;
+                changedVelocity = true;
+            }
+            else if (localVelocity.z < 0.0f)
+            {
+                localVelocity.z += playerDrag * Time.deltaTime;
+                if (localVelocity.z > 0.0f) localVelocity.z = 0.0f;
+                changedVelocity = true;
+            }
+
+            if (changedVelocity)
+            {
+                Vector3 transformedVelocity = transform.TransformDirection(localVelocity);
+
+                Vector3 newVelocityCal = new Vector3(transformedVelocity.x, this.playerRigidBody.linearVelocity.y, transformedVelocity.z);
+
+                this.playerRigidBody.linearVelocity = newVelocityCal;
+            }
+        }
+    }
+
+    [ServerRpc]
+    public void OnNetworkUpdatePosition_ServerRpc(Vector3 position, Vector3 velocity, VelocityUpdate update = VelocityUpdate.None)
     {
         if(this.playerRigidBody)
         {
@@ -183,63 +288,23 @@ public class Player : NetworkBehaviour
 
                 this.playerRigidBody.linearVelocity = targetVelocity;
             }
-
-            if(gravity >  0.0f && !isGrounded)
-            {
-                var velocityCopy = this.playerRigidBody.linearVelocity;
-
-                if(velocityCopy.y > -terminalVelocity)
-                {
-                    velocityCopy.y -= gravity;
-
-                    if(velocityCopy.y < -terminalVelocity)
-                        velocityCopy.y = -terminalVelocity;
-
-                    this.playerRigidBody.linearVelocity = velocityCopy;
-                }
-            }
-
-            if (playerDrag > 0.0f && CanPerformDrag())
-            {
-                bool changedVelocity = false;
-
-                Vector3 localVelocity = transform.InverseTransformDirection(this.playerRigidBody.linearVelocity);
-
-                if (localVelocity.x > 0.0f)
-                {
-                    localVelocity.x -= playerDrag * Time.deltaTime;
-                    if (localVelocity.x < 0.0f) localVelocity.x = 0.0f;
-                    changedVelocity = true;
-                }
-                else if (localVelocity.x < 0.0f)
-                {
-                    localVelocity.x += playerDrag * Time.deltaTime;
-                    if (localVelocity.x > 0.0f) localVelocity.x = 0.0f;
-                    changedVelocity = true;
-                }
-
-                if (localVelocity.z > 0.0f)
-                {
-                    localVelocity.z -= playerDrag * Time.deltaTime;
-                    if (localVelocity.z < 0.0f) localVelocity.z = 0.0f;
-                    changedVelocity = true;
-                }
-                else if (localVelocity.z < 0.0f)
-                {
-                    localVelocity.z += playerDrag * Time.deltaTime;
-                    if (localVelocity.z > 0.0f) localVelocity.z = 0.0f;
-                    changedVelocity = true;
-                }
-
-                if (changedVelocity)
-                    this.playerRigidBody.linearVelocity = transform.TransformDirection(localVelocity);
-            }
-
-
-
-            if (onUpdatePlayer != null)
-                onUpdatePlayer(this);
         }
+    }
+
+    [ClientRpc]
+    private void OnNetworkUpdateData_ClientRpc(PlayerUpdateData data)
+    {
+        if(this.playerRigidBody)
+        {
+            this.playerRigidBody.position = data.position;
+            this.playerRigidBody.linearVelocity = data.velocity;
+        }
+
+        this.currentStamina = data.stamina;
+        this.isAlive = !data.isDead;
+
+        if (onUpdatePlayer != null)
+            onUpdatePlayer(this);
     }
 
     [ClientRpc]
@@ -300,7 +365,7 @@ public class Player : NetworkBehaviour
         else
             this.playerRigidBody.position = position;
 
-        OnNetworkUpdatePositionClientRpc(position, Vector3.zero);
+        OnNetworkUpdatePosition_ServerRpc(position, Vector3.zero);
     }
 
     [ServerRpc]
@@ -411,7 +476,7 @@ public class Player : NetworkBehaviour
             }
         }
 
-        this.OnNetworkUpdatePositionClientRpc(currentPosition, (nextPosition - currentPosition), velocityState);
+        this.OnNetworkUpdatePosition_ServerRpc(currentPosition, (nextPosition - currentPosition), velocityState);
     }
 
     [Rpc(SendTo.Server)]
@@ -420,7 +485,10 @@ public class Player : NetworkBehaviour
         if (CheckAuthority(rpcParams) == false || !canMove)
             return; //Unauthorized Call!
 
-        OnMoveCharacterServerRpc(movement);
+        if (isMovementHooked)
+            OnMoveCharacterServerRpc(onMovePlayerHook(this, movement));
+        else
+            OnMoveCharacterServerRpc(movement);
     }
 
     [Rpc(SendTo.Server)]
@@ -429,7 +497,8 @@ public class Player : NetworkBehaviour
         if (CheckAuthority(rpcParams) == false || !canMove)
             return; //Unauthorized Call!
 
-        OnRotateCharacterServerRpc(addValue);
+        if(canRotate)
+            OnRotateCharacterServerRpc(addValue);
     }
 
     public void SetPlayerNameLabel()
@@ -459,13 +528,29 @@ public class Player : NetworkBehaviour
         }
     }
 
+    private PlayerUpdateData CraftPlayerUpdateData()
+    {
+        PlayerUpdateData data = new PlayerUpdateData();
+
+        data.isDead = !isAlive;
+        data.stamina = currentStamina;
+
+        if (this.playerRigidBody)
+        {
+            data.velocity = this.playerRigidBody.linearVelocity;
+            data.position = this.playerRigidBody.position;
+        }
+
+        return data;
+    }
+
     private bool CheckAuthority(RpcParams rpcParams)
     {
         var SenderID = rpcParams.Receive.SenderClientId;
 
         if (SenderID != id)
         {
-            Debug.Log($"Player with ID: {SenderID}, tried Executing unauthorized Code");
+            DebugClass.Log($"Player with ID: {SenderID}, tried Executing unauthorized Code");
             return false;
         }
 
@@ -489,18 +574,7 @@ public class Player : NetworkBehaviour
 
     private void FixedUpdate()
     {
-        if (timeSinceWalking >= 2.0f)
-        {
-            if(currentStamina < maxStamina)
-            {
-                currentStamina += (regenStaminaAmount * Time.deltaTime);
 
-                if (currentStamina > maxStamina)
-                    currentStamina = maxStamina;
-            }
-        }
-        else
-            timeSinceWalking += Time.deltaTime;
     }
 
     private void Initialize()
@@ -518,4 +592,23 @@ public class Player : NetworkBehaviour
         return playerName;
     }
 
+    public bool IsMovementHooked()
+    {
+        return isMovementHooked;
+    }
+
+    public bool IsGrounded()
+    {
+        return isGrounded;
+    }
+
+    public float GetStamina()
+    {
+        return currentStamina;
+    }
+
+    public float GetMaxStamina()
+    {
+        return maxStamina;
+    }
 }

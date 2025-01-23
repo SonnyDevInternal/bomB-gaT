@@ -1,3 +1,4 @@
+using Assets.Scripts;
 using Newtonsoft.Json;
 using System.Collections.Generic;
 using Unity.Netcode;
@@ -5,6 +6,13 @@ using Unity.Netcode.Transports.UTP;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
+
+public struct BombData
+{
+    public float BombTimer;
+    public float BombTimeCurrent;
+    public float BombTimerExtender;
+}
 
 public struct PlayerData
 {
@@ -76,14 +84,17 @@ public class ServerManager : NetworkBehaviour
     [SerializeField]
     private Button StartGameBtn = null;
 
+    [SerializeField]
+    private Text BombTimer = null;
+
     private BombBehaviour currentBombBehaviour = null;
 
     private float defaultPlayerSpeed = 6.0f;
     private float defaultPlayerRunningSpeed = 14.0f;
-    private float defaultJumpHeight = 15.0f;
+    private float defaultJumpHeight = 8.0f;
     private float defaultTerminalVelocity = 30.0f;
     private float defaultPlayerDrag = 40.0f;
-    private float defaultPlayerGravity = 0.1f;
+    private float defaultPlayerGravity = 17.0f;
 
     private float defaultDegenStamina = 20.0f;
     private float defaultRegenStamina = 10.0f;
@@ -91,9 +102,9 @@ public class ServerManager : NetworkBehaviour
 
     private float defaultHeadHeight = 1.0f;
 
-    public float defaultBombTimer = 30.0f;
-    public float defaultBombTimerCurrent = 0.0f;
-    public float defaultBombTimerExtender = 0.0f;
+    private float defaultBombTimer = 30.0f;
+    private float defaultBombTimerCurrent = 0.0f;
+    private float defaultBombTimerExtender = 0.0f;
 
     private float passBombReach = 2.0f;
 
@@ -274,10 +285,10 @@ public class ServerManager : NetworkBehaviour
                 playerComp.SetPlayerNameLabel();
             }
             else
-                Debug.Log("Object didnt have PlayerComponent");
+                DebugClass.Log("Object didnt have PlayerComponent");
         }
         else
-            Debug.Log("Object id was invalid");
+            DebugClass.Log("Object id was invalid");
     }
 
     [ClientRpc]
@@ -332,7 +343,7 @@ public class ServerManager : NetworkBehaviour
 
         if (playerIDDictionary.ContainsKey(id))
         {
-            Debug.Log("Player tried Creating an Player Instacnce but Already has an Connected Player Instance!");
+            DebugClass.Log("Player tried Creating an Player Instacnce but Already has an Connected Player Instance!");
             return;
         }
 
@@ -368,7 +379,7 @@ public class ServerManager : NetworkBehaviour
 
                     Player.VelocityUpdate velocityUpdate = Player.VelocityUpdate.Forward | Player.VelocityUpdate.Right;
 
-                    ply.OnNetworkUpdatePositionClientRpc(ply.transform.position, (playerTransform.forward * passBombPushStrength), velocityUpdate);
+                    ply.OnNetworkUpdatePosition_ServerRpc(ply.transform.position, (playerTransform.forward * passBombPushStrength), velocityUpdate);
 
                     currentBombBehaviour.ServerPassBombToPlayerServerRpc(ply.id);
                 }
@@ -431,11 +442,11 @@ public class ServerManager : NetworkBehaviour
 
     private void HandlePlayerJoin(ulong clientId)
     {
-        Debug.Log("Player joined with Client ID: " + clientId);
+        DebugClass.Log("Player joined with Client ID: " + clientId);
     }
     private void HandlePlayerLeaving(ulong clientId)
     {
-        Debug.Log("Player left with Client ID: " + clientId);
+        DebugClass.Log("Player left with Client ID: " + clientId);
 
         for (int i = 0; i < playerList.Count; i++)
         {
@@ -526,5 +537,16 @@ public class ServerManager : NetworkBehaviour
 
         if (playerList.Count < 2)
             StartGameBtn.gameObject.SetActive(false);
+    }
+
+    public BombData GetBombData()
+    {
+        var bombData = new BombData();
+
+        bombData.BombTimer = defaultBombTimer;
+        bombData.BombTimeCurrent = defaultBombTimerCurrent;
+        bombData.BombTimerExtender = defaultBombTimerExtender;
+
+        return bombData;
     }
 }

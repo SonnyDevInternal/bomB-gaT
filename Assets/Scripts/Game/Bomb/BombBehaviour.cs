@@ -1,6 +1,9 @@
+using Assets.Scripts;
 using System.Collections.Generic;
+using TMPro;
 using Unity.Netcode;
 using UnityEngine;
+using static Player;
 
 public class BombBehaviour : ServerObject
 {
@@ -30,6 +33,8 @@ public class BombBehaviour : ServerObject
     private List<ulong> connectedUsers = new List<ulong>();
     private List<ulong> aliveUsers = null;
 
+    private Player movementHookedPlayer = null; //in case of abrupt destruction, free hook from player
+
     public int connectingUsers = 0;
 
     public override void OnNetworkSpawn()
@@ -39,14 +44,16 @@ public class BombBehaviour : ServerObject
         SendBombHasBeenLoadedRpc();
     }
 
+    public override void OnNetworkDespawn()
+    {
+        base.OnNetworkDespawn();
+
+        if(IsHost)
+            UnhookPlayerMovement_ServerRpc();
+    }
+
     protected override void OnUpdate()
     {
-        if(owningPlayer)
-        {
-            if (!isKinematic())
-                SetUseRigidBodyServerRpc(false);
-        }
-
         if(IsHost)
         {
             if(hasActivatedBomb)
@@ -113,8 +120,6 @@ public class BombBehaviour : ServerObject
         this.detonationTimerCurrent = detonationTimerCurrent;
         this.detonationTimerExtender = detonationTimerExtender;
 
-        ObjectUseNonServerPos(true);
-
         SetBombColliders(false);
     }
 
@@ -134,8 +139,13 @@ public class BombBehaviour : ServerObject
             detonationTimerCurrent -= this.detonationTimerExtender;
         }
 
+        UnhookPlayerMovement_ServerRpc();
+
         owningPlayer = serverManager.FindPlayer(PlayerID);
-        transform.parent = owningPlayer.transform;
+
+        transform.SetParent(owningPlayer.transform, false);
+
+        HookPlayerMovement_ServerRpc(PlayerID);
 
         UpdateBombTimerClientRpc(detonationTimerCurrent);
         ClientPassBombClientRpc(PlayerID);
@@ -152,7 +162,7 @@ public class BombBehaviour : ServerObject
 
         ServerExplodeBombClientRpc();
 
-        if (aliveUsers.Count > 0)
+        if (aliveUsers.Count > 1)
         {
             float perc = (aliveUsers.Count / connectedUsers.Count);
 
@@ -165,9 +175,31 @@ public class BombBehaviour : ServerObject
     }
 
     [ServerRpc]
-    public void OnGameEnd_ServerRpc()
+    private void OnGameEnd_ServerRpc()
     {
+        DebugClass.Log("Game Ended!");
 
+
+
+        Destroy(gameObject);
+    }
+
+    [ServerRpc]
+    private void OnGameStart_ServerRpc()
+    {
+        BombData bombData = serverManager.GetBombData();
+
+        aliveUsers = new List<ulong>(connectedUsers);
+
+        var randomPlayerID = serverManager.GetRandomPlayer().id;
+
+        this.SetUseRigidBody_ServerRpc(false);
+
+        //ObjectUseNonServerPos_ServerRpc(true);
+
+        ServerPassBombToPlayerServerRpc(randomPlayerID);
+
+        ServerActivateBombClientRpc(randomPlayerID, bombData.BombTimer, bombData.BombTimeCurrent, bombData.BombTimerExtender);
     }
 
     [Rpc(SendTo.Server)]
@@ -175,7 +207,7 @@ public class BombBehaviour : ServerObject
     {
         if(connectedUsers.Exists(x => x == rpcParams.Receive.SenderClientId))
         {
-            Debug.Log($"Player with id {rpcParams.Receive.SenderClientId}, tried Sending Load Request twice!");
+            DebugClass.Log($"Player with id {rpcParams.Receive.SenderClientId}, tried Sending Load Request twice!");
             return;
         }
         else
@@ -194,13 +226,39 @@ public class BombBehaviour : ServerObject
 
             if(connected >= connectingUsers)
             {
-                Debug.Log("All Clients Loaded, Game Starting!");
+                DebugClass.Log("All Clients Loaded, Game Starting!");
 
-                aliveUsers = new List<ulong>(connectedUsers);
-
-                ServerActivateBombClientRpc(serverManager.GetRandomPlayer().id, serverManager.defaultBombTimer, serverManager.defaultBombTimerCurrent, serverManager.defaultBombTimerExtender);
+                OnGameStart_ServerRpc();
             }
         }
+    }
+
+    [ServerRpc]
+    private void UnhookPlayerMovement_ServerRpc()
+    {
+        if (movementHookedPlayer && movementHookedPlayer.IsMovementHooked())
+        {
+            movementHookedPlayer.UnhookOnMovePlayer();
+            movementHookedPlayer = null;
+        }
+            
+    }
+
+    [ServerRpc]
+    private void HookPlayerMovement_ServerRpc(ulong playerID)
+    {
+        var player = serverManager.FindPlayer(playerID);
+
+        if (player && !player.IsMovementHooked())
+        {
+            player.HookOnMovePlayer(this.OnMovePlayerHook);
+            movementHookedPlayer = player;
+        }
+    }
+
+    private PlayerMovement OnMovePlayerHook(Player _this, PlayerMovement originalMovement)
+    {
+        return originalMovement;
     }
 
     private void SetBombColliders(bool active)

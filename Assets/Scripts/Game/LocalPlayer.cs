@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.UI;
 
 public class LocalPlayer : MonoBehaviour
 {
@@ -7,6 +8,9 @@ public class LocalPlayer : MonoBehaviour
 
     private Player owningPlayer = null;
     private Camera playerCamera = null;
+
+    [SerializeField]
+    private UI_Bar staminaBar = null;
 
     private ServerManager manager = null;
 
@@ -72,7 +76,7 @@ public class LocalPlayer : MonoBehaviour
         if (Input.GetKey(KeyCode.D))
             movement |= Player.PlayerMovement.Right;
 
-        if (Input.GetKey(KeyCode.Space))
+        if (Input.GetKeyDown(KeyCode.Space) && this.owningPlayer.IsGrounded())
             movement |= Player.PlayerMovement.Up;
 
         if (Input.GetKeyDown(KeyCode.Mouse0))
@@ -129,6 +133,12 @@ public class LocalPlayer : MonoBehaviour
 
     private void OnPlayerUpdated(Player player)
     {
+        if(this.staminaBar)
+        {
+            float perc = player.GetStamina() / player.GetMaxStamina();
+
+            this.staminaBar.SetPercentage(perc);
+        }
         //this.playerCamera.transform.rotation = player.transform.rotation;
     }
 
