@@ -611,4 +611,9 @@ public class Player : NetworkBehaviour
     {
         return maxStamina;
     }
+
+    public void SetStamina(float stamina)
+    {
+        currentStamina = stamina;
+    }
 }

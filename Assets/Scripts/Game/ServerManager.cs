@@ -192,6 +192,7 @@ public class ServerManager : NetworkBehaviour
             playerComp.regenStaminaAmount = defaultRegenStamina;
             playerComp.runningSpeed = defaultPlayerRunningSpeed;
             playerComp.maxStamina = defaultMaxStamina;
+            playerComp.SetStamina(defaultMaxStamina);
             playerComp.terminalVelocity = defaultTerminalVelocity;
 
             if (connectionID != 0)
@@ -343,7 +344,7 @@ public class ServerManager : NetworkBehaviour
 
         if (playerIDDictionary.ContainsKey(id))
         {
-            DebugClass.Log("Player tried Creating an Player Instacnce but Already has an Connected Player Instance!");
+            DebugClass.Log("Player tried Creating an Player Instance but Already has an Connected Player Instance!");
             return;
         }
 
