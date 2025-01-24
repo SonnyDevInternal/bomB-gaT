@@ -14,7 +14,7 @@ public class UI_Bar : MonoBehaviour
     private bool manipulateX = true;
     private bool manipulateY = false;
 
-    void Start()
+    void Awake()
     {
         curBar = GetComponent<Image>();
 
@@ -35,6 +35,9 @@ public class UI_Bar : MonoBehaviour
 
     private void RecalculateBar()
     {
+        if (!curBar || !maxBar)
+            return;
+
         if(!canOverflow)
         {
             if(curPercentage > maxDrawPercentage)

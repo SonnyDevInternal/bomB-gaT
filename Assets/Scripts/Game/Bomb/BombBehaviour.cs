@@ -1,9 +1,46 @@
 using Assets.Scripts;
 using System.Collections.Generic;
+using System.Linq;
 using TMPro;
 using Unity.Netcode;
 using UnityEngine;
 using static Player;
+
+public struct Translated_PlayerMovement
+{
+    public int shufflingTimes;
+    public int Forward;
+    public int Backward;
+    public int Right;
+    public int Left;
+    public int Up;
+
+    public Translated_PlayerMovement(int shufflingTimes)
+    {
+        this.shufflingTimes = shufflingTimes;
+
+        this.Forward = 1 << 1;
+        this.Backward = 1 << 2;
+        this.Right = 1 << 3;
+        this.Left = 1 << 4;
+        this.Up = 1 << 5;
+    }
+
+    public void Shuffle()
+    {
+        for (int i = 0; i < this.shufflingTimes; i++)
+        {
+            var forwardValue = this.Forward;
+
+            this.Forward = Backward;
+            this.Backward = Right;
+            this.Right = Left;
+            this.Left = Up;
+            this.Up = forwardValue;
+            //this.Down = backwardValue;
+        }
+    }
+}
 
 public class BombBehaviour : ServerObject
 {
@@ -34,6 +71,7 @@ public class BombBehaviour : ServerObject
     private List<ulong> aliveUsers = null;
 
     private Player movementHookedPlayer = null; //in case of abrupt destruction, free hook from player
+    private Translated_PlayerMovement currentMovementTranslation = new Translated_PlayerMovement(1);
 
     public int connectingUsers = 0;
 
@@ -84,14 +122,9 @@ public class BombBehaviour : ServerObject
 
     }
 
-    public bool CanBePassed()
-    {
-        return delayPassBombTimerCurrent >= delayPassBombTimer;
-    }
-
 
     [ClientRpc]
-    public void ServerExplodeBombClientRpc()
+    private void ServerExplodeBombClientRpc()
     {
         if(!hasExploded)
         {
@@ -102,14 +135,14 @@ public class BombBehaviour : ServerObject
     }
 
     [ClientRpc]
-    public void UpdateBombTimerClientRpc(float detonationTimerCurrent)
+    private void UpdateBombTimerClientRpc(float detonationTimerCurrent)
     {
         this.detonationTimerCurrent = detonationTimerCurrent;
     }
 
 
     [ClientRpc]
-    public void ServerActivateBombClientRpc(ulong IDToGive, float detonationTimer, float detonationTimerCurrent, float detonationTimerExtender) //call to start Timer!
+    private void ServerActivateBombClientRpc(ulong IDToGive, float detonationTimer, float detonationTimerCurrent, float detonationTimerExtender) //call to start Timer!
     {
         if (hasActivatedBomb)
             return;
@@ -124,7 +157,7 @@ public class BombBehaviour : ServerObject
     }
 
     [ClientRpc]
-    public void ClientPassBombClientRpc(ulong PlayerID)
+    private void ClientPassBombClientRpc(ulong PlayerID)
     {
         owningPlayer = serverManager.FindPlayer(PlayerID);
     }
@@ -132,6 +165,17 @@ public class BombBehaviour : ServerObject
     [ServerRpc]
     public void ServerPassBombToPlayerServerRpc(ulong PlayerID)
     {
+        if (owningPlayer != null)
+        {
+            if (aliveUsers.Contains(owningPlayer.id))
+            {
+                owningPlayer.PlayerChangeBombState_ServerRpc(false);
+                owningPlayer.isConsumingStamina = true;
+            }
+        }
+
+        this.delayPassBombTimerCurrent = 0.0f;
+
         var percentage = (this.detonationTimerCurrent / this.detonationTimer);
 
         if (percentage > 0.86f)
@@ -143,7 +187,31 @@ public class BombBehaviour : ServerObject
 
         owningPlayer = serverManager.FindPlayer(PlayerID);
 
+        if(!owningPlayer)  //Check for Disconnected Players
+        {
+            if (aliveUsers.Count > 1)
+            {
+                this.connectedUsers.Remove(PlayerID);
+
+                ServerPassBombToPlayerServerRpc(this.GetRandomPlayerID());
+            }
+            else
+                OnGameEnd_ServerRpc();
+
+            return;
+        }
+
+        currentMovementTranslation.Shuffle();
+
+        owningPlayer.PlayerChangeBombState_ServerRpc(true);
+
+        owningPlayer.isConsumingStamina = false;
+
         transform.SetParent(owningPlayer.transform, false);
+
+        transform.position = owningPlayer.bombHand.transform.position;
+
+        ServerUpdateObjectServerRpc();
 
         HookPlayerMovement_ServerRpc(PlayerID);
 
@@ -152,21 +220,24 @@ public class BombBehaviour : ServerObject
     }
 
     [ServerRpc]
-    public void OnPlayerDie_ServerRpc()
+    private void OnPlayerDie_ServerRpc()
     {
-        owningPlayer.SetCanMoveServerRpc(false);
+        ServerExplodeBombClientRpc();
 
-        owningPlayer.SetPositionServerRpc(deathPosition);
+        owningPlayer.PlayerChangeBombState_ServerRpc(false);
+        owningPlayer.isConsumingStamina = true;
+
+        owningPlayer.KillPlayer_ServerRpc();
 
         aliveUsers.Remove(owningPlayer.id);
-
-        ServerExplodeBombClientRpc();
 
         if (aliveUsers.Count > 1)
         {
             float perc = (aliveUsers.Count / connectedUsers.Count);
 
             detonationTimerCurrent = (detonationTimer * perc) + 2.0f;
+
+            owningPlayer = null;
 
             ServerPassBombToPlayerServerRpc(this.GetRandomPlayerID());
         }
@@ -175,51 +246,91 @@ public class BombBehaviour : ServerObject
     }
 
     [ServerRpc]
-    private void OnGameEnd_ServerRpc()
-    {
-        DebugClass.Log("Game Ended!");
-
-
-
-        Destroy(gameObject);
-    }
-
-    [ServerRpc]
     private void OnGameStart_ServerRpc()
     {
         BombData bombData = serverManager.GetBombData();
+
+        currentMovementTranslation.Shuffle();
 
         aliveUsers = new List<ulong>(connectedUsers);
 
         var randomPlayerID = serverManager.GetRandomPlayer().id;
 
+        for (int i = 0; i < aliveUsers.Count; i++) //Teleport players to Game Area
+        {
+            var player = serverManager.FindPlayer(aliveUsers[i]);
+
+            if(player)
+                player.SetPositionServerRpc(serverManager.GetRandomSpawnLocation().position);
+        }
+
         this.SetUseRigidBody_ServerRpc(false);
 
-        //ObjectUseNonServerPos_ServerRpc(true);
+        ObjectUseNonServerPos_ServerRpc(true);
 
         ServerPassBombToPlayerServerRpc(randomPlayerID);
 
         ServerActivateBombClientRpc(randomPlayerID, bombData.BombTimer, bombData.BombTimeCurrent, bombData.BombTimerExtender);
     }
 
-    [Rpc(SendTo.Server)]
-    public void SendBombHasBeenLoadedRpc(RpcParams rpcParams = default)
+    [ServerRpc]
+    private void OnGameEnd_ServerRpc()
     {
-        if(connectedUsers.Exists(x => x == rpcParams.Receive.SenderClientId))
+        DebugClass.Log("Game Ended!");
+
+        if(aliveUsers.Count > 0)
         {
-            DebugClass.Log($"Player with id {rpcParams.Receive.SenderClientId}, tried Sending Load Request twice!");
+            ulong playerAliveID = aliveUsers[0];
+
+            Player alivePlayer = serverManager.FindPlayer(playerAliveID);
+
+            if (alivePlayer) //Check if player left
+            {
+                alivePlayer.SetPositionServerRpc(serverManager.GetRandomSpawnLocation(true).position);
+                alivePlayer.PlayerGameResult_ServerRpc(true);
+            }
+            else
+                DebugClass.Log("Couldnt Find Player with aliveID");
+                
+            connectedUsers.Remove(playerAliveID);
+
+            for (int i = 0; i < connectedUsers.Count; i++)
+            {
+                Player deadPlayer = serverManager.FindPlayer(connectedUsers[i]);
+
+                if (deadPlayer) //Check if player left
+                {
+                    deadPlayer.PlayerGameResult_ServerRpc(false);
+                    deadPlayer.RevivePlayer_ServerRpc();
+                }
+            }
+        }
+
+        serverManager.OnEndGameServerRpc();
+    }
+
+    [Rpc(SendTo.Server)]
+    private void SendBombHasBeenLoadedRpc(RpcParams rpcParams = default)
+    {
+        var SenderClientID = rpcParams.Receive.SenderClientId;
+
+        if (connectedUsers.Exists(x => x == SenderClientID))
+        {
+            DebugClass.Log($"Player with id {SenderClientID}, tried Sending Load Request twice!");
             return;
         }
         else
         {
             int connected = 0;
 
-            connectedUsers.Add(rpcParams.Receive.SenderClientId);
+            connectedUsers.Add(SenderClientID);
 
             for (int i = 0; i < connectedUsers.Count; i++)
             {
                 if (NetworkManager.ConnectedClients.ContainsKey(connectedUsers[i]))
+                {
                     connected++;
+                }
                 else
                     connectedUsers.Remove(connectedUsers[i]);
             }
@@ -258,7 +369,7 @@ public class BombBehaviour : ServerObject
 
     private PlayerMovement OnMovePlayerHook(Player _this, PlayerMovement originalMovement)
     {
-        return originalMovement;
+        return TranslateMovementToCurrent(originalMovement);
     }
 
     private void SetBombColliders(bool active)
@@ -271,7 +382,34 @@ public class BombBehaviour : ServerObject
         }
     }
 
-    public ulong GetRandomPlayerID()
+    private PlayerMovement TranslateMovementToCurrent(PlayerMovement movement)
+    {
+        PlayerMovement out_ = PlayerMovement.None;
+
+        if ((movement & PlayerMovement.Forward) == PlayerMovement.Forward)
+            out_ |= (PlayerMovement)currentMovementTranslation.Forward;
+
+        if ((movement & PlayerMovement.Backward) == PlayerMovement.Backward)
+            out_ |= (PlayerMovement)currentMovementTranslation.Backward;
+
+        if ((movement & PlayerMovement.Right) == PlayerMovement.Right)
+            out_ |= (PlayerMovement)currentMovementTranslation.Right;
+
+        if ((movement & PlayerMovement.Left) == PlayerMovement.Left)
+            out_ |= (PlayerMovement)currentMovementTranslation.Left;
+
+        if ((movement & PlayerMovement.Up) == PlayerMovement.Up)
+            out_ |= (PlayerMovement)currentMovementTranslation.Up;
+
+        if ((movement & PlayerMovement.Down) == PlayerMovement.Down)
+            out_ |= PlayerMovement.Down;
+
+        out_ |= PlayerMovement.FastForward;
+
+        return out_;
+    }
+
+    private ulong GetRandomPlayerID()
     {
         ulong player = 0;
 
@@ -300,5 +438,15 @@ public class BombBehaviour : ServerObject
         }
 
         return player;
+    }
+
+    public bool CanBePassed()
+    {
+        return delayPassBombTimerCurrent >= delayPassBombTimer;
+    }
+
+    public bool IsValidPassablePlayer(ulong ID)
+    {
+        return aliveUsers.Contains(ID); 
     }
 }

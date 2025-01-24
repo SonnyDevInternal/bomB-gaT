@@ -4,6 +4,99 @@ using Unity.Netcode;
 using UnityEngine;
 using Assets.Scripts;
 using UnityEngine.UIElements;
+using static Player;
+
+public struct PBool
+{
+    public enum EBoolState
+    {
+        Error = -1,
+        False = 0,
+        True = 1,
+        FalseThisFrame = 2,
+        TrueThisFrame = 3,
+    }
+
+    public char value;
+
+    public PBool(EBoolState state)
+    {
+        value = (char)state;
+    }
+
+    public PBool(bool state)
+    {
+        value = '\0';
+
+        value = boolToChar(state);
+    }
+
+    public PBool(char state)
+    {
+        value = state;
+    }
+
+    private char boolToChar(bool state)
+    {
+        char out_ = '\0';
+
+        switch (state)
+        {
+            case false:
+                out_ = '\0';
+                break;
+            case true:
+                out_ = '\x0001';
+                break;
+        }
+
+        return out_;
+    }
+
+    public void DeframeBool() //Call to deframe bool
+    {
+        switch(GetState())
+        {
+            case EBoolState.FalseThisFrame:
+                value = boolToChar(false);
+                break;
+
+            case EBoolState.TrueThisFrame:
+                value = boolToChar(true);
+                break;
+        }
+    }
+
+    public EBoolState GetState()
+    {
+        return (EBoolState)value;
+    }
+
+    public char GetCharState()
+    {
+        return value;
+    }
+
+    public bool GetBool() //Doesnt account for This frame or not!
+    {
+        switch (GetState())
+        {
+            case EBoolState.False:
+                return false;
+
+            case EBoolState.True:
+                return true;
+
+            case EBoolState.FalseThisFrame:
+                return false;
+
+            case EBoolState.TrueThisFrame:
+                return true;
+        }
+
+        return false;
+    }
+}
 
 struct PlayerUpdateData : INetworkSerializable
 {
@@ -11,7 +104,9 @@ struct PlayerUpdateData : INetworkSerializable
     public Vector3 velocity;
 
     public float stamina;
-    public bool isDead;
+    public char isAlive;
+    public char hasBomb;
+    public char hasWon;
 
     public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
     {
@@ -20,14 +115,18 @@ struct PlayerUpdateData : INetworkSerializable
             serializer.SerializeValue(ref position);
             serializer.SerializeValue(ref velocity);
             serializer.SerializeValue(ref stamina);
-            serializer.SerializeValue(ref isDead);
+            serializer.SerializeValue(ref isAlive);
+            serializer.SerializeValue(ref hasBomb);
+            serializer.SerializeValue(ref hasWon);
         }
         else
         {
             serializer.SerializeValue(ref position);
             serializer.SerializeValue(ref velocity);
             serializer.SerializeValue(ref stamina);
-            serializer.SerializeValue(ref isDead);
+            serializer.SerializeValue(ref isAlive);
+            serializer.SerializeValue(ref hasBomb);
+            serializer.SerializeValue(ref hasWon);
         }
     }
 }
@@ -57,6 +156,12 @@ public class Player : NetworkBehaviour
         ForwardRight = Forward | Right,
     }
 
+    public enum GameState
+    {
+        GameStarted,
+        GameEnded
+    }
+
     public GameObject serverManager = null;
 
     [SerializeField]
@@ -84,8 +189,12 @@ public class Player : NetworkBehaviour
     private bool canJump = true;
     private bool canRotate = true;
 
+    public bool isConsumingStamina = true;
     public bool isLocalPlayer = false;
-    public bool isAlive = true;
+
+    public PBool isAlive = new PBool(true);
+    public PBool hasBomb = new PBool(false);
+    public PBool hasWon = new PBool(false);
 
     private bool isMovementHooked = false;
 
@@ -110,16 +219,53 @@ public class Player : NetworkBehaviour
     public delegate void OnUpdatePlayer(Player _this);
     public delegate void OnDestroyPlayer(Player _this, bool ByScene);
     public delegate PlayerMovement OnMovePlayerHook(Player _this, PlayerMovement originalMovement);
+    public delegate void OnChangedLivingState(Player _this, bool alive);
+    public delegate void OnChangedBombHoldState(Player _this, bool hasBomb);
+    public delegate void OnGameResultState(Player _this, bool hasWon);
 
     private OnUpdatePlayer onUpdatePlayer = null;
     private OnDestroyPlayer onDestroyPlayer = null;
     private OnMovePlayerHook onMovePlayerHook = null;
+    private OnChangedLivingState onChangedLivingState = null;
+    private OnChangedBombHoldState onChangedBombHoldState = null;
+    private OnGameResultState onGameResultState = null;
 
+    public void BindOnUpdate(OnUpdatePlayer onUpdateValue) {this.onUpdatePlayer = onUpdateValue;}
+    public void BindOnDestroy(OnDestroyPlayer onDestroyValue) {this.onDestroyPlayer = onDestroyValue;}
+    public void BindOnChangeLivingState(OnChangedLivingState onChangedLivingState) {this.onChangedLivingState = onChangedLivingState;}
+    public void BindOnChangedBombHoldState(OnChangedBombHoldState onChangedBombHoldState) {this.onChangedBombHoldState = onChangedBombHoldState; }
+    public void BindOnGameResultState(OnGameResultState onGameResultState) {this.onGameResultState = onGameResultState; }
+    public void HookOnMovePlayer(OnMovePlayerHook onMovePlayerHook) { this.isMovementHooked = true; this.onMovePlayerHook = onMovePlayerHook;}
+
+    public void UnbindOnDestroy() { this.onDestroyPlayer = null; }
+    public void UnbindOnUpdate() { this.onUpdatePlayer = null; }
+    public void UnbindOnChangeLivingState() { this.onChangedLivingState = null; }
+    public void UnbindOnChangedBombHoldState() { this.onChangedBombHoldState = null; }
+    public void UnbindOnGameResultState() { this.onGameResultState = null; }
+
+    public void UnhookOnMovePlayer() { this.isMovementHooked = false; this.onMovePlayerHook = null; }
 
     private void Start()
     {
         playerRigidBody = GetComponent<Rigidbody>();
         playerCapsuleCollider = GetComponent<CapsuleCollider>();
+    }
+
+    public override void OnNetworkSpawn()
+    {
+        base.OnNetworkSpawn();
+
+        serverManager = GameObject.FindWithTag("ServerManager");
+
+        Initialize();
+    }
+
+    public override void OnNetworkDespawn()
+    {
+        base.OnNetworkDespawn();
+
+        if(onDestroyPlayer != null)
+            onDestroyPlayer(this, false);
     }
 
     private void Update()
@@ -162,40 +308,17 @@ public class Player : NetworkBehaviour
                 else
                     forceSlideTimeCurrent += Time.deltaTime;
             }
-            else
-            {
-                this.UpdatePlayerGravity_ServerRpc();
 
-                OnNetworkUpdateData_ClientRpc(CraftPlayerUpdateData());
-            }
+            this.UpdatePlayerGravity_ServerRpc();
+
+            OnNetworkUpdateData_ClientRpc(CraftPlayerUpdateData());
+
+            this.isAlive.DeframeBool();
+            this.hasBomb.DeframeBool();
+            this.hasWon.DeframeBool();
         }
     }
 
-    public void BindOnUpdate(OnUpdatePlayer onUpdateValue) {this.onUpdatePlayer = onUpdateValue;}
-    public void BindOnDestroy(OnDestroyPlayer onDestroyValue) {this.onDestroyPlayer = onDestroyValue;}
-    public void HookOnMovePlayer(OnMovePlayerHook onMovePlayerHook) { this.isMovementHooked = true; this.onMovePlayerHook = onMovePlayerHook;}
-
-    public void UnbindOnDestroy() { this.onDestroyPlayer = null; }
-    public void UnbindOnUpdate() { this.onUpdatePlayer = null; }
-
-    public void UnhookOnMovePlayer() { this.isMovementHooked = false; this.onMovePlayerHook = null; }
-
-    public override void OnNetworkSpawn()
-    {
-        base.OnNetworkSpawn();
-
-        serverManager = GameObject.FindWithTag("ServerManager");
-
-        Initialize();
-    }
-
-    public override void OnNetworkDespawn()
-    {
-        base.OnNetworkDespawn();
-
-        if(onDestroyPlayer != null)
-            onDestroyPlayer(this, false);
-    }
 
     [ServerRpc]
     private void UpdatePlayerGravity_ServerRpc()
@@ -261,6 +384,8 @@ public class Player : NetworkBehaviour
     [ServerRpc]
     public void OnNetworkUpdatePosition_ServerRpc(Vector3 position, Vector3 velocity, VelocityUpdate update = VelocityUpdate.None)
     {
+        this.transform.position = position;
+
         if(this.playerRigidBody)
         {
             this.playerRigidBody.position = position;
@@ -301,7 +426,61 @@ public class Player : NetworkBehaviour
         }
 
         this.currentStamina = data.stamina;
-        this.isAlive = !data.isDead;
+        
+        PBool livingState = new PBool(data.isAlive);
+        PBool bombState = new PBool(data.hasBomb);
+        PBool wonState = new PBool(data.hasWon);
+
+        switch(livingState.GetState())
+        {
+            case PBool.EBoolState.FalseThisFrame:
+                if(onChangedLivingState != null)
+                    onChangedLivingState(this, false);
+
+                isAlive = new PBool(PBool.EBoolState.False);
+            break;
+
+            case PBool.EBoolState.TrueThisFrame:
+                if (onChangedLivingState != null)
+                    onChangedLivingState(this, true);
+
+                isAlive = new PBool(PBool.EBoolState.True);
+            break;
+        }
+
+        switch(bombState.GetState())
+        {
+            case PBool.EBoolState.FalseThisFrame:
+                if (onChangedBombHoldState != null)
+                    onChangedBombHoldState(this, false);
+
+                hasBomb = new PBool(PBool.EBoolState.False);
+            break;
+
+            case PBool.EBoolState.TrueThisFrame:
+                if (onChangedBombHoldState != null)
+                    onChangedBombHoldState(this, true);
+
+                hasBomb = new PBool(PBool.EBoolState.True);
+            break;
+        }
+
+        switch (wonState.GetState())
+        {
+            case PBool.EBoolState.FalseThisFrame:
+                if (onGameResultState != null)
+                    onGameResultState(this, false);
+
+                wonState = new PBool(PBool.EBoolState.False);
+                break;
+
+            case PBool.EBoolState.TrueThisFrame:
+                if (onGameResultState != null)
+                    onGameResultState(this, true);
+
+                wonState = new PBool(PBool.EBoolState.True);
+                break;
+        }
 
         if (onUpdatePlayer != null)
             onUpdatePlayer(this);
@@ -313,15 +492,48 @@ public class Player : NetworkBehaviour
         this.transform.Rotate(rotation);
     }
 
-    [ClientRpc]
-    public void KillPlayerClientRpc()
+    [ServerRpc]
+    public void KillPlayer_ServerRpc()
     {
-        if(this.onDestroyPlayer != null)
+        if (this.isAlive.GetBool())
         {
-            this.onDestroyPlayer(this, false);
+            ServerManager sv = serverManager.GetComponent<ServerManager>();
 
-            this.onDestroyPlayer = null;
+            this.isAlive = new PBool(PBool.EBoolState.FalseThisFrame);
+
+            SetPositionServerRpc(sv.GetRandomSpawnLocation(true).position);
         }
+    }
+
+    [ServerRpc]
+    public void RevivePlayer_ServerRpc()
+    {
+        if(!this.isAlive.GetBool())
+        {
+            ServerManager sv = serverManager.GetComponent<ServerManager>();
+
+            this.isAlive = new PBool(PBool.EBoolState.TrueThisFrame);
+
+            //SetPositionServerRpc(sv.GetRandomSpawnLocation(true).position);
+        }
+    }
+
+    [ServerRpc]
+    public void PlayerChangeBombState_ServerRpc(bool hasBomb)
+    {
+        if(hasBomb)
+            this.hasBomb = new PBool(PBool.EBoolState.TrueThisFrame);
+        else
+            this.hasBomb = new PBool(PBool.EBoolState.FalseThisFrame);
+    }
+
+    [ServerRpc]
+    public void PlayerGameResult_ServerRpc(bool hasWon)
+    {
+        if (hasWon)
+            this.hasWon = new PBool(PBool.EBoolState.TrueThisFrame);
+        else
+            this.hasWon = new PBool(PBool.EBoolState.FalseThisFrame);
     }
 
     [ClientRpc]
@@ -360,9 +572,9 @@ public class Player : NetworkBehaviour
     [ServerRpc]
     public void SetPositionServerRpc(Vector3 position)
     {
-        if(this.playerRigidBody.isKinematic)
-            transform.position = position;
-        else
+        transform.position = position;
+
+        if (!this.playerRigidBody.isKinematic)
             this.playerRigidBody.position = position;
 
         OnNetworkUpdatePosition_ServerRpc(position, Vector3.zero);
@@ -386,40 +598,34 @@ public class Player : NetworkBehaviour
 
         Vector3 nextPosition = currentPosition;
 
-        bool usingMoveFlag = false;
+        float speedBoost = 0.0f;
+
+        if ((movingDir & PlayerMovement.FastForward) == PlayerMovement.FastForward)
+        {
+            if(isConsumingStamina)
+            {
+                timeSinceWalking = 0.0f;
+
+                if (currentStamina > 0.0f)
+                {
+                    currentStamina -= (degenStaminaAmount * Time.deltaTime);
+
+                    if (currentStamina < 0.0f)
+                        currentStamina = 0.0f;
+
+                    speedBoost = runningSpeed - movementSpeed;
+                }
+            }
+            else
+                speedBoost = runningSpeed - movementSpeed;
+        }
 
         if ((movingDir & PlayerMovement.Forward) == PlayerMovement.Forward)
         {
-            
-
             Vector3 fw = transform.forward;
 
-            nextPosition.x += (fw.x * movementSpeed);
-            nextPosition.z += (fw.z * movementSpeed);
-        }
-        else if((movingDir & PlayerMovement.FastForward) == PlayerMovement.FastForward)
-        {
-            
-
-            Vector3 fw = transform.forward;
-
-            timeSinceWalking = 0.0f;
-
-            if(currentStamina > 0.0f)
-            {
-                currentStamina -= (degenStaminaAmount * Time.deltaTime);
-
-                if(currentStamina < 0.0f)
-                    currentStamina = 0.0f;
-
-                nextPosition.x += (fw.x * runningSpeed);
-                nextPosition.z += (fw.z * runningSpeed);
-            }
-            else
-            {
-                nextPosition.x += (fw.x * movementSpeed);
-                nextPosition.z += (fw.z * movementSpeed);
-            }
+            nextPosition.x += (fw.x * (movementSpeed + speedBoost));
+            nextPosition.z += (fw.z * (movementSpeed + speedBoost));
         }
 
         if ((movingDir & PlayerMovement.Backward) == PlayerMovement.Backward)
@@ -532,7 +738,10 @@ public class Player : NetworkBehaviour
     {
         PlayerUpdateData data = new PlayerUpdateData();
 
-        data.isDead = !isAlive;
+        data.isAlive = (isAlive.GetCharState());
+        data.hasBomb = (hasBomb.GetCharState());
+        data.hasWon = (hasWon.GetCharState());
+
         data.stamina = currentStamina;
 
         if (this.playerRigidBody)

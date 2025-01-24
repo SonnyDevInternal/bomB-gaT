@@ -57,14 +57,9 @@ public class ServerObject : NetworkBehaviour
 
     void Update()
     {
-        bool ishost = IsHost;
-
-        if (ishost && this.useClient)
-            return;
-
         OnUpdate();
 
-        if (ishost)
+        if (IsHost && !this.useClient)
         {
             ServerUpdateObjectServerRpc();
         }

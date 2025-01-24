@@ -70,7 +70,7 @@ public class ServerManager : NetworkBehaviour
     private GameObject bombPrefab = null;
 
     [SerializeField]
-    private GameObject spawnPoint = null;
+    private GameObject defaultSpawnPoint = null;
 
     [SerializeField]
     private GameObject deathPosition = null;
@@ -113,12 +113,16 @@ public class ServerManager : NetworkBehaviour
 
     private bool hasGameStarted = false;
 
+    [SerializeField]
+    private bool DEBUG_KillAllPlayer = false;
+
     private List<Player> playerList = new List<Player>();
     private Dictionary<ulong, Player> playerIDDictionary = new Dictionary<ulong, Player>();
 
     private void Start()
     {
         NetworkManager.Singleton.OnClientConnectedCallback += HandlePlayerJoin;
+        NetworkManager.Singleton.OnClientDisconnectCallback += HandlePlayerLeaving;
 
         JoinBtn.onClick.AddListener(this.ClientFindAndConnect);
         HostBtn.onClick.AddListener(this.HostServer);
@@ -140,13 +144,26 @@ public class ServerManager : NetworkBehaviour
 
     private void Update()
     {
+        if(IsHost)
+        {
+            if(DEBUG_KillAllPlayer)
+            {
+                DEBUG_KillAllPlayer = false;
 
+                for (int i = 0; i < playerList.Count; i++)
+                {
+                    playerList[i].KillPlayer_ServerRpc();
+                }
+            }
+        }
     }
 
     public void HostServer()
     {
         SetConnectionData();
         NetworkManager.Singleton.StartHost();
+
+        SetStateConnectButtons(false);
 
         CreatePlayerServerRpc(Login.currentCookie);
     }
@@ -176,7 +193,7 @@ public class ServerManager : NetworkBehaviour
             if(Cookie == null)
                 NetworkManager.Singleton.DisconnectClient(connectionID);
 
-            var transform = spawnPoint.transform;
+            var transform = GetRandomSpawnLocation();
 
             var instance = Instantiate(playerPrefab, transform.position, transform.rotation);
 
@@ -295,6 +312,7 @@ public class ServerManager : NetworkBehaviour
     [ClientRpc]
     private void OnEndGameBombClientRpc()
     {
+        hasGameStarted = false;
         currentBombBehaviour = null;
     }
 
@@ -306,9 +324,8 @@ public class ServerManager : NetworkBehaviour
         currentBombBehaviour.serverManager = this;
     }
 
-
     [ServerRpc]
-    private void OnEndGameServerRpc()
+    public void OnEndGameServerRpc()
     {
         currentBombBehaviour.NetworkObject.Despawn();
 
@@ -318,7 +335,18 @@ public class ServerManager : NetworkBehaviour
     [ServerRpc]
     private void OnStartGameBtnServerRpc()
     {
+        if (hasGameStarted)
+        {
+            DebugClass.Log("Can´t start Game!, Game is already running!");
+            return;
+        }
+
         hasGameStarted = true;
+
+        for (int i = 0; i < this.playerList.Count; i++)
+        {
+            this.playerList[i].SetPositionServerRpc(GetRandomSpawnLocation().position);
+        }
 
         var instantiatedObj = Instantiate(bombPrefab, Vector3.zero, Quaternion.Euler(Vector3.zero));
 
@@ -374,7 +402,7 @@ public class ServerManager : NetworkBehaviour
 
             if(Physics.Raycast(playerTransform.position, playerTransform.forward, out RaycastHit hitInfo, passBombReach))
             {
-                if(hitInfo.transform.TryGetComponent<Player>(out Player ply))
+                if(hitInfo.transform.TryGetComponent<Player>(out Player ply) && currentBombBehaviour.IsValidPassablePlayer(ply.id))
                 {
                     ply.SetForceSlidedClientRpc(1.0f);
 
@@ -434,11 +462,19 @@ public class ServerManager : NetworkBehaviour
     {
         NetworkManager.Singleton.OnClientConnectedCallback -= OnPlayerCompletlyConnectedInternal;
 
+        SetStateConnectButtons(false);
+
         OnPlayerCompletlyConnectedRpc(Login.currentCookie);
     }
     private void OnPlayerDestroyed(Player player, bool ByScene)
     {
         RemovePlayer(player);
+    }
+
+    private void SetStateConnectButtons(bool active)
+    {
+        JoinBtn.gameObject.SetActive(active);
+        HostBtn.gameObject.SetActive(active);
     }
 
     private void HandlePlayerJoin(ulong clientId)
@@ -487,6 +523,68 @@ public class ServerManager : NetworkBehaviour
         return player;
     }
 
+    public Transform GetRandomSpawnLocation(bool forceOutbound = false)
+    {
+        Transform spawnLocation = defaultSpawnPoint.transform;
+
+        if (!hasGameStarted || forceOutbound)
+        {
+            var spawnPoints = GameObject.FindGameObjectsWithTag("SpawnPointOutbound");
+
+            var currentGameTime = Time.time;
+
+            if (currentGameTime < 12.0f)
+                currentGameTime *= 12.0f;
+
+            var someCalculation = currentGameTime / 6.969f;
+
+            int calc = Mathf.RoundToInt(someCalculation);
+
+            for (int i = 0; i < calc;)
+            {
+                for (int i1 = 0; i1 < spawnPoints.Length; i1++, i++)
+                {
+                    if (i + 1 >= calc)
+                    {
+                        spawnLocation = spawnPoints[i1].transform;
+                        i = calc;
+                        break;
+                    }
+
+                }
+            }
+        }
+        else
+        {
+            var spawnPoints = GameObject.FindGameObjectsWithTag("SpawnPointInbound");
+
+            var currentGameTime = Time.time;
+
+            if (currentGameTime < 12.0f)
+                currentGameTime *= 12.0f;
+
+            var someCalculation = currentGameTime / 6.969f;
+
+            int calc = Mathf.RoundToInt(someCalculation);
+
+            for (int i = 0; i < calc;)
+            {
+                for (int i1 = 0; i1 < spawnPoints.Length; i1++, i++)
+                {
+                    if (i + 1 >= calc)
+                    {
+                        spawnLocation = spawnPoints[i1].transform;
+                        i = calc;
+                        break;
+                    }
+
+                }
+            }
+        }
+
+        return spawnLocation;
+    }
+
     public Dictionary<ulong, Player> GetPlayerDictionary()
     {
         Dictionary<ulong, Player> playerList = new Dictionary<ulong, Player>(this.playerList.Count);
@@ -524,10 +622,13 @@ public class ServerManager : NetworkBehaviour
 
         playerIDDictionary = GetPlayerDictionary();
 
-        if(playerList.Count >= 2)
-            StartGameBtn.gameObject.SetActive(true);
-        else
-            StartGameBtn.gameObject.SetActive(false);
+        if(IsHost)
+        {
+            if (playerList.Count >= 2)
+                StartGameBtn.gameObject.SetActive(true);
+            else
+                StartGameBtn.gameObject.SetActive(false);
+        }
     }
 
     public void RemovePlayer(Player player)
@@ -536,8 +637,11 @@ public class ServerManager : NetworkBehaviour
 
         playerIDDictionary = GetPlayerDictionary();
 
-        if (playerList.Count < 2)
-            StartGameBtn.gameObject.SetActive(false);
+        if (IsHost)
+        {
+            if (playerList.Count < 2)
+                StartGameBtn.gameObject.SetActive(false);
+        }
     }
 
     public BombData GetBombData()
@@ -549,5 +653,10 @@ public class ServerManager : NetworkBehaviour
         bombData.BombTimerExtender = defaultBombTimerExtender;
 
         return bombData;
+    }
+
+    public float GetDefaultPlayerRunSpeed()
+    {
+        return defaultPlayerRunningSpeed;
     }
 }

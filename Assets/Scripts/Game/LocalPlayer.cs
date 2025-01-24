@@ -1,5 +1,4 @@
 using UnityEngine;
-using UnityEngine.UI;
 
 public class LocalPlayer : MonoBehaviour
 {
@@ -11,6 +10,9 @@ public class LocalPlayer : MonoBehaviour
 
     [SerializeField]
     private UI_Bar staminaBar = null;
+
+    [SerializeField]
+    private UI_GameState gameState = null;
 
     private ServerManager manager = null;
 
@@ -28,6 +30,9 @@ public class LocalPlayer : MonoBehaviour
         {
             this.owningPlayer.UnbindOnDestroy();
             this.owningPlayer.UnbindOnUpdate();
+            this.owningPlayer.UnbindOnChangeLivingState();
+            this.owningPlayer.UnbindOnChangedBombHoldState();
+            this.owningPlayer.UnbindOnGameResultState();
         }
     }
 
@@ -58,14 +63,12 @@ public class LocalPlayer : MonoBehaviour
 
         Player.PlayerMovement movement = Player.PlayerMovement.None;
 
+        if (Input.GetKey(KeyCode.LeftShift))
+            movement |= Player.PlayerMovement.FastForward;
+
         if (Input.GetKey(KeyCode.W))
-        {
-            if(Input.GetKey(KeyCode.LeftShift))
-                movement |= Player.PlayerMovement.FastForward;
-            else
-                movement |= Player.PlayerMovement.Forward;
-        }
-            
+            movement |= Player.PlayerMovement.Forward;
+
 
         if (Input.GetKey(KeyCode.S))
             movement |= Player.PlayerMovement.Backward;
@@ -76,7 +79,7 @@ public class LocalPlayer : MonoBehaviour
         if (Input.GetKey(KeyCode.D))
             movement |= Player.PlayerMovement.Right;
 
-        if (Input.GetKeyDown(KeyCode.Space) && this.owningPlayer.IsGrounded())
+        if (Input.GetKey(KeyCode.Space) && this.owningPlayer.IsGrounded())
             movement |= Player.PlayerMovement.Up;
 
         if (Input.GetKeyDown(KeyCode.Mouse0))
@@ -133,6 +136,9 @@ public class LocalPlayer : MonoBehaviour
 
     private void OnPlayerUpdated(Player player)
     {
+        if (!this.hasPlayer) 
+            return;
+
         if(this.staminaBar)
         {
             float perc = player.GetStamina() / player.GetMaxStamina();
@@ -142,6 +148,46 @@ public class LocalPlayer : MonoBehaviour
         //this.playerCamera.transform.rotation = player.transform.rotation;
     }
 
+    private void OnPlayerLivingStateChanged(Player player, bool alive)
+    {
+        if(gameState)
+        {
+            if(!alive)
+            {
+                gameState.ForceEvent("You Died, Lmao!", 1.0f, 0.5f, 1.0f);
+            }
+        }
+    }
+
+    private void OnPlayerBombStatusChanged(Player player, bool hasBomb)
+    {
+        if (gameState)
+        {
+            if (hasBomb)
+            {
+                gameState.ExecuteEvent("You have the Bomb!", 1.0f, 0.5f, 1.0f);
+            }
+            else
+            {
+                gameState.ExecuteEvent("You no longer have the Bomb!", 1.0f, 0.5f, 1.0f);
+            }
+        }
+    }
+
+    private void OnPlayerGameResultState(Player player, bool hasWon)
+    {
+        if (gameState)
+        {
+            if (hasWon)
+            {
+                gameState.ForceEvent("You Won!", 1.0f, 3.0f, 1.0f);
+            }
+            else
+            {
+                gameState.ForceEvent("You Lost!", 1.0f, 3.0f, 1.0f);
+            }
+        }
+    }
 
     public void BindNetworkPlayer(Player player)
     {
@@ -152,6 +198,9 @@ public class LocalPlayer : MonoBehaviour
 
         player.BindOnDestroy(OnPlayerDestroyed);
         player.BindOnUpdate(OnPlayerUpdated);
+        player.BindOnChangeLivingState(OnPlayerLivingStateChanged);
+        player.BindOnChangedBombHoldState(OnPlayerBombStatusChanged);
+        player.BindOnGameResultState(OnPlayerGameResultState);
 
         Cursor.lockState = CursorLockMode.Locked;
 
