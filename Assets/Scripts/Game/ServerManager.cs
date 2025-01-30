@@ -7,13 +7,6 @@ using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
 
-public struct BombData
-{
-    public float BombTimer;
-    public float BombTimeCurrent;
-    public float BombTimerExtender;
-}
-
 public struct PlayerData
 {
     public ulong connectionid;
@@ -60,20 +53,16 @@ public struct PlayersData : INetworkSerializable
 
 public class ServerManager : NetworkBehaviour
 {
-    private string host = "http://localhost";
-
     [SerializeField]
     private GameObject playerPrefab = null;
     [SerializeField]
     private GameObject localPlayerPrefab = null;
-    [SerializeField]
-    private GameObject bombPrefab = null;
 
     [SerializeField]
-    private GameObject defaultSpawnPoint = null;
+    protected GameObject defaultSpawnPoint = null;
 
     [SerializeField]
-    private GameObject deathPosition = null;
+    protected GameObject deathPosition = null;
 
     [SerializeField]
     private Button HostBtn = null;
@@ -84,40 +73,24 @@ public class ServerManager : NetworkBehaviour
     [SerializeField]
     private Button StartGameBtn = null;
 
-    [SerializeField]
-    private Text BombTimer = null;
+    protected float defaultPlayerSpeed = 6.0f;
+    protected float defaultPlayerRunningSpeed = 14.0f;
+    protected float defaultJumpHeight = 8.0f;
+    protected float defaultTerminalVelocity = 30.0f;
+    protected float defaultPlayerDrag = 40.0f;
+    protected float defaultPlayerGravity = 17.0f;
 
-    private BombBehaviour currentBombBehaviour = null;
+    protected float defaultDegenStamina = 20.0f;
+    protected float defaultRegenStamina = 10.0f;
+    protected float defaultMaxStamina = 100.0f;
 
-    private float defaultPlayerSpeed = 6.0f;
-    private float defaultPlayerRunningSpeed = 14.0f;
-    private float defaultJumpHeight = 8.0f;
-    private float defaultTerminalVelocity = 30.0f;
-    private float defaultPlayerDrag = 40.0f;
-    private float defaultPlayerGravity = 17.0f;
-
-    private float defaultDegenStamina = 20.0f;
-    private float defaultRegenStamina = 10.0f;
-    private float defaultMaxStamina = 100.0f;
-
-    private float defaultHeadHeight = 1.0f;
-
-    private float defaultBombTimer = 30.0f;
-    private float defaultBombTimerCurrent = 0.0f;
-    private float defaultBombTimerExtender = 0.0f;
-
-    private float passBombReach = 2.0f;
+    protected float defaultHeadHeight = 1.0f;
 
     [SerializeField]
-    private float passBombPushStrength = 10.0f;
+    protected bool DEBUG_KillAllPlayer = false;
 
-    private bool hasGameStarted = false;
-
-    [SerializeField]
-    private bool DEBUG_KillAllPlayer = false;
-
-    private List<Player> playerList = new List<Player>();
-    private Dictionary<ulong, Player> playerIDDictionary = new Dictionary<ulong, Player>();
+    protected List<Player> playerList = new List<Player>();
+    protected Dictionary<ulong, Player> playerIDDictionary = new Dictionary<ulong, Player>();
 
     private void Start()
     {
@@ -138,8 +111,7 @@ public class ServerManager : NetworkBehaviour
         if(NetworkManager.Singleton)
             NetworkManager.Singleton.OnClientConnectedCallback -= HandlePlayerJoin;
 
-        if (currentBombBehaviour)
-            currentBombBehaviour.serverManager = null;
+        OnDestroyServer();
     }
 
     private void Update()
@@ -156,6 +128,18 @@ public class ServerManager : NetworkBehaviour
                 }
             }
         }
+
+        OnUpdateServer();
+    }
+
+    protected virtual void OnDestroyServer()
+    {
+
+    }
+
+    protected virtual void OnUpdateServer()
+    {
+
     }
 
     public void HostServer()
@@ -181,7 +165,7 @@ public class ServerManager : NetworkBehaviour
         var transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
         if (transport == null) return;
 
-        transport.SetConnectionData("127.0.0.1", 7979, "0.0.0.0");
+        transport.SetConnectionData(Login.host, 7777, "0.0.0.0");
 
     }
 
@@ -254,9 +238,9 @@ public class ServerManager : NetworkBehaviour
 
     public IEnumerator<UnityWebRequestAsyncOperation> FindPlayerName(ulong entityID, ulong connectionID, string Cookie)
     {
-        if(IsHost)
+        if(IsHost) // 
         {
-            var webrequest = UnityWebRequest.Get($"{host}/Api/User.php?cookie={Cookie}");
+            var webrequest = UnityWebRequest.Get($"{Login.host_}/Api/User.php?cookie={Cookie}");
 
             yield return webrequest.SendWebRequest();
 
@@ -309,60 +293,11 @@ public class ServerManager : NetworkBehaviour
             DebugClass.Log("Object id was invalid");
     }
 
-    [ClientRpc]
-    private void OnEndGameBombClientRpc()
-    {
-        hasGameStarted = false;
-        currentBombBehaviour = null;
-    }
-
-    [ClientRpc]
-    private void NotifyClientsGameStartClientRpc(ulong ID)
-    {
-        currentBombBehaviour = GetNetworkObject(ID).GetComponent<BombBehaviour>();
-
-        currentBombBehaviour.serverManager = this;
-    }
 
     [ServerRpc]
-    public void OnEndGameServerRpc()
+    protected virtual void OnStartGameBtnServerRpc()
     {
-        currentBombBehaviour.NetworkObject.Despawn();
-
-        OnEndGameBombClientRpc();
-    }
-
-    [ServerRpc]
-    private void OnStartGameBtnServerRpc()
-    {
-        if (hasGameStarted)
-        {
-            DebugClass.Log("Can´t start Game!, Game is already running!");
-            return;
-        }
-
-        hasGameStarted = true;
-
-        for (int i = 0; i < this.playerList.Count; i++)
-        {
-            this.playerList[i].SetPositionServerRpc(GetRandomSpawnLocation().position);
-        }
-
-        var instantiatedObj = Instantiate(bombPrefab, Vector3.zero, Quaternion.Euler(Vector3.zero));
-
-        var netObj = instantiatedObj.GetComponent<NetworkObject>();
-
-        var bombComp = netObj.GetComponent<BombBehaviour>();
-
-        bombComp.deathPosition = deathPosition.transform.position;
-
-        bombComp.connectingUsers = this.playerList.Count;
-
-        netObj.Spawn();
-
-        NotifyClientsGameStartClientRpc(netObj.NetworkObjectId);
-
-        //bombComp.ServerActivateBombClientRpc(GetRandomPlayer().id, defaultBombTimer, defaultBombTimerCurrent, defaultBombTimerExtender);
+        
     }
 
     [Rpc(SendTo.Server)]
@@ -385,34 +320,6 @@ public class ServerManager : NetworkBehaviour
         else
         {
             NetworkManager.Singleton.DisconnectClient(id);
-        }
-    }
-
-    [Rpc(SendTo.Server)]
-    public void TryHitPlayersWithBombRpc(RpcParams param = default)
-    {
-        if (!currentBombBehaviour || !currentBombBehaviour.CanBePassed())
-            return;
-
-        var player = FindPlayer(param.Receive.SenderClientId);
-
-        if(player)
-        {
-            var playerTransform = player.transform;
-
-            if(Physics.Raycast(playerTransform.position, playerTransform.forward, out RaycastHit hitInfo, passBombReach))
-            {
-                if(hitInfo.transform.TryGetComponent<Player>(out Player ply) && currentBombBehaviour.IsValidPassablePlayer(ply.id))
-                {
-                    ply.SetForceSlidedClientRpc(1.0f);
-
-                    Player.VelocityUpdate velocityUpdate = Player.VelocityUpdate.Forward | Player.VelocityUpdate.Right;
-
-                    ply.OnNetworkUpdatePosition_ServerRpc(ply.transform.position, (playerTransform.forward * passBombPushStrength), velocityUpdate);
-
-                    currentBombBehaviour.ServerPassBombToPlayerServerRpc(ply.id);
-                }
-            }
         }
     }
 
@@ -523,11 +430,11 @@ public class ServerManager : NetworkBehaviour
         return player;
     }
 
-    public Transform GetRandomSpawnLocation(bool forceOutbound = false)
+    public virtual Transform GetRandomSpawnLocation(bool forceOutbound = false)
     {
         Transform spawnLocation = defaultSpawnPoint.transform;
 
-        if (!hasGameStarted || forceOutbound)
+        if (forceOutbound)
         {
             var spawnPoints = GameObject.FindGameObjectsWithTag("SpawnPointOutbound");
 
@@ -642,17 +549,6 @@ public class ServerManager : NetworkBehaviour
             if (playerList.Count < 2)
                 StartGameBtn.gameObject.SetActive(false);
         }
-    }
-
-    public BombData GetBombData()
-    {
-        var bombData = new BombData();
-
-        bombData.BombTimer = defaultBombTimer;
-        bombData.BombTimeCurrent = defaultBombTimerCurrent;
-        bombData.BombTimerExtender = defaultBombTimerExtender;
-
-        return bombData;
     }
 
     public float GetDefaultPlayerRunSpeed()

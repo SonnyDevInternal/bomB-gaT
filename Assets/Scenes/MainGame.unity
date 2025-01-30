@@ -1375,7 +1375,7 @@ GameObject:
   m_Component:
   - component: {fileID: 608414976}
   - component: {fileID: 608414977}
-  - component: {fileID: 608414978}
+  - component: {fileID: 608414979}
   m_Layer: 0
   m_Name: ServerManager
   m_TagString: ServerManager
@@ -1423,7 +1423,7 @@ MonoBehaviour:
   AutoObjectParentSync: 1
   SyncOwnerTransformWhenParented: 1
   AllowOwnerToParent: 0
---- !u!114 &608414978
+--- !u!114 &608414979
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -1432,21 +1432,21 @@ MonoBehaviour:
   m_GameObject: {fileID: 608414975}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: af94f81f4f2d4e4458f7c881dceb4dab, type: 3}
+  m_Script: {fileID: 11500000, guid: 45a1827e302facf49a380f211bf2e12e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   ShowTopMostFoldoutHeaderGroup: 1
   playerPrefab: {fileID: 3884329422936762993, guid: 89a84467a800eff4eb8da584450fae6b, type: 3}
   localPlayerPrefab: {fileID: 2796460298511892742, guid: 20f4b8dc5bdd7c346a7a963d140950e9, type: 3}
-  bombPrefab: {fileID: 7767890215860109029, guid: bea40453cbc829b498b1b7c73f0bbb92, type: 3}
   defaultSpawnPoint: {fileID: 1294705405}
   deathPosition: {fileID: 1054523278}
   HostBtn: {fileID: 1012148361}
   JoinBtn: {fileID: 1977136318}
   StartGameBtn: {fileID: 285767773}
-  BombTimer: {fileID: 0}
-  passBombPushStrength: 50
   DEBUG_KillAllPlayer: 0
+  bombPrefab: {fileID: 7767890215860109029, guid: bea40453cbc829b498b1b7c73f0bbb92, type: 3}
+  BombTimer: {fileID: 0}
+  passBombPushStrength: 10
 --- !u!1 &647051271
 GameObject:
   m_ObjectHideFlags: 0
@@ -3352,9 +3352,9 @@ MonoBehaviour:
   m_MaxConnectAttempts: 60
   m_DisconnectTimeoutMS: 30000
   ConnectionData:
-    Address: 127.0.0.1
+    Address: 192.168.8.200
     Port: 7777
-    ServerListenAddress: 127.0.0.1
+    ServerListenAddress: 0.0.0.0
   DebugSimulator:
     PacketDelayMS: 0
     PacketJitterMS: 0

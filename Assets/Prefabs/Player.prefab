@@ -210,7 +210,7 @@ GameObject:
   - component: {fileID: 4411735898817330670}
   - component: {fileID: 8579553457577389979}
   - component: {fileID: 4180781357913486301}
-  - component: {fileID: 8715409823034069180}
+  - component: {fileID: -1968473564719890434}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -311,7 +311,7 @@ MonoBehaviour:
   AutoObjectParentSync: 1
   SyncOwnerTransformWhenParented: 1
   AllowOwnerToParent: 0
---- !u!114 &8715409823034069180
+--- !u!114 &-1968473564719890434
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -320,16 +320,16 @@ MonoBehaviour:
   m_GameObject: {fileID: 3884329422936762993}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: a2d68e822ce73a141a4cba29a0d26563, type: 3}
+  m_Script: {fileID: 11500000, guid: 1565dc5c099eb4245ad81b8cf1e40c65, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   ShowTopMostFoldoutHeaderGroup: 1
   serverManager: {fileID: 0}
   head: {fileID: 6206740476393074278}
-  bombHand: {fileID: 5183790463045858930}
   playerNameLabel: {fileID: 7636712365034180582}
   playerDrag: 40
   terminalVelocity: 30
+  isConsumingStamina: 1
   isLocalPlayer: 0
   playerName: 
   id: 0
@@ -341,6 +341,7 @@ MonoBehaviour:
   regenStaminaAmount: 10
   degenStaminaAmount: 20
   currentStamina: 0
+  bombHand: {fileID: 5183790463045858930}
 --- !u!1 &5183790463045858930
 GameObject:
   m_ObjectHideFlags: 0

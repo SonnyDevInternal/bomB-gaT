@@ -1,10 +1,6 @@
-using static Assets.Scripts.DebugClass;
-
 using Unity.Netcode;
 using UnityEngine;
 using Assets.Scripts;
-using UnityEngine.UIElements;
-using static Player;
 
 public struct PBool
 {
@@ -98,15 +94,13 @@ public struct PBool
     }
 }
 
-struct PlayerUpdateData : INetworkSerializable
+public struct PlayerUpdateData : INetworkSerializable
 {
     public Vector3 position;
     public Vector3 velocity;
 
     public float stamina;
     public char isAlive;
-    public char hasBomb;
-    public char hasWon;
 
     public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
     {
@@ -116,8 +110,6 @@ struct PlayerUpdateData : INetworkSerializable
             serializer.SerializeValue(ref velocity);
             serializer.SerializeValue(ref stamina);
             serializer.SerializeValue(ref isAlive);
-            serializer.SerializeValue(ref hasBomb);
-            serializer.SerializeValue(ref hasWon);
         }
         else
         {
@@ -125,8 +117,6 @@ struct PlayerUpdateData : INetworkSerializable
             serializer.SerializeValue(ref velocity);
             serializer.SerializeValue(ref stamina);
             serializer.SerializeValue(ref isAlive);
-            serializer.SerializeValue(ref hasBomb);
-            serializer.SerializeValue(ref hasWon);
         }
     }
 }
@@ -165,38 +155,33 @@ public class Player : NetworkBehaviour
     public GameObject serverManager = null;
 
     [SerializeField]
-    private GameObject head = null;
+    protected GameObject head = null;
 
     [SerializeField]
-    public GameObject bombHand = null;
+    protected TMPro.TextMeshPro playerNameLabel = null;
 
-    [SerializeField]
-    private TMPro.TextMeshPro playerNameLabel = null;
-
-    private Rigidbody playerRigidBody = null;
-    private CapsuleCollider playerCapsuleCollider = null;
+    protected Rigidbody playerRigidBody = null;
+    protected CapsuleCollider playerCapsuleCollider = null;
 
     private bool isGrounded = false;
     private bool isForcedSliding = false;
 
-    private float forceSlideTime = 2.0f;
-    private float forceSlideTimeCurrent = 0.0f;
+    protected float forceSlideTime = 2.0f;
+    protected float forceSlideTimeCurrent = 0.0f;
 
     public float playerDrag = 3.0f;
     public float terminalVelocity = 30.0f;
 
-    private bool canMove = true;
-    private bool canJump = true;
-    private bool canRotate = true;
+    protected bool canMove = true;
+    protected bool canJump = true;
+    protected bool canRotate = true;
 
     public bool isConsumingStamina = true;
     public bool isLocalPlayer = false;
 
     public PBool isAlive = new PBool(true);
-    public PBool hasBomb = new PBool(false);
-    public PBool hasWon = new PBool(false);
 
-    private bool isMovementHooked = false;
+    protected bool isMovementHooked = false;
 
     public string playerName = "";
     public ulong id = 0; // Connection id this Player belongs to
@@ -212,36 +197,28 @@ public class Player : NetworkBehaviour
     public float regenStaminaAmount = 10.0f;
     public float degenStaminaAmount = 20.0f;
 
-    private float timeSinceWalking = 0.0f;
+    protected float timeSinceWalking = 0.0f;
     [SerializeField]
-    private float currentStamina = 0.0f;
+    protected float currentStamina = 0.0f;
 
     public delegate void OnUpdatePlayer(Player _this);
     public delegate void OnDestroyPlayer(Player _this, bool ByScene);
     public delegate PlayerMovement OnMovePlayerHook(Player _this, PlayerMovement originalMovement);
     public delegate void OnChangedLivingState(Player _this, bool alive);
-    public delegate void OnChangedBombHoldState(Player _this, bool hasBomb);
-    public delegate void OnGameResultState(Player _this, bool hasWon);
 
-    private OnUpdatePlayer onUpdatePlayer = null;
-    private OnDestroyPlayer onDestroyPlayer = null;
-    private OnMovePlayerHook onMovePlayerHook = null;
-    private OnChangedLivingState onChangedLivingState = null;
-    private OnChangedBombHoldState onChangedBombHoldState = null;
-    private OnGameResultState onGameResultState = null;
+    protected OnUpdatePlayer onUpdatePlayer = null;
+    protected OnDestroyPlayer onDestroyPlayer = null;
+    protected OnMovePlayerHook onMovePlayerHook = null;
+    protected OnChangedLivingState onChangedLivingState = null;
 
     public void BindOnUpdate(OnUpdatePlayer onUpdateValue) {this.onUpdatePlayer = onUpdateValue;}
     public void BindOnDestroy(OnDestroyPlayer onDestroyValue) {this.onDestroyPlayer = onDestroyValue;}
     public void BindOnChangeLivingState(OnChangedLivingState onChangedLivingState) {this.onChangedLivingState = onChangedLivingState;}
-    public void BindOnChangedBombHoldState(OnChangedBombHoldState onChangedBombHoldState) {this.onChangedBombHoldState = onChangedBombHoldState; }
-    public void BindOnGameResultState(OnGameResultState onGameResultState) {this.onGameResultState = onGameResultState; }
     public void HookOnMovePlayer(OnMovePlayerHook onMovePlayerHook) { this.isMovementHooked = true; this.onMovePlayerHook = onMovePlayerHook;}
 
     public void UnbindOnDestroy() { this.onDestroyPlayer = null; }
     public void UnbindOnUpdate() { this.onUpdatePlayer = null; }
     public void UnbindOnChangeLivingState() { this.onChangedLivingState = null; }
-    public void UnbindOnChangedBombHoldState() { this.onChangedBombHoldState = null; }
-    public void UnbindOnGameResultState() { this.onGameResultState = null; }
 
     public void UnhookOnMovePlayer() { this.isMovementHooked = false; this.onMovePlayerHook = null; }
 
@@ -311,12 +288,18 @@ public class Player : NetworkBehaviour
 
             this.UpdatePlayerGravity_ServerRpc();
 
-            OnNetworkUpdateData_ClientRpc(CraftPlayerUpdateData());
+            this.OnNetworkRequestUpdateData_ServerRpc();
 
             this.isAlive.DeframeBool();
-            this.hasBomb.DeframeBool();
-            this.hasWon.DeframeBool();
+
+            DeframeBools_ServerRpc();
         }
+    }
+
+    [ServerRpc]
+    protected virtual void DeframeBools_ServerRpc()
+    {
+
     }
 
 
@@ -416,6 +399,12 @@ public class Player : NetworkBehaviour
         }
     }
 
+    [ServerRpc]
+    protected virtual void OnNetworkRequestUpdateData_ServerRpc()
+    {
+        OnNetworkUpdateData_ClientRpc(CraftPlayerUpdateData());
+    }
+
     [ClientRpc]
     private void OnNetworkUpdateData_ClientRpc(PlayerUpdateData data)
     {
@@ -428,8 +417,6 @@ public class Player : NetworkBehaviour
         this.currentStamina = data.stamina;
         
         PBool livingState = new PBool(data.isAlive);
-        PBool bombState = new PBool(data.hasBomb);
-        PBool wonState = new PBool(data.hasWon);
 
         switch(livingState.GetState())
         {
@@ -446,40 +433,6 @@ public class Player : NetworkBehaviour
 
                 isAlive = new PBool(PBool.EBoolState.True);
             break;
-        }
-
-        switch(bombState.GetState())
-        {
-            case PBool.EBoolState.FalseThisFrame:
-                if (onChangedBombHoldState != null)
-                    onChangedBombHoldState(this, false);
-
-                hasBomb = new PBool(PBool.EBoolState.False);
-            break;
-
-            case PBool.EBoolState.TrueThisFrame:
-                if (onChangedBombHoldState != null)
-                    onChangedBombHoldState(this, true);
-
-                hasBomb = new PBool(PBool.EBoolState.True);
-            break;
-        }
-
-        switch (wonState.GetState())
-        {
-            case PBool.EBoolState.FalseThisFrame:
-                if (onGameResultState != null)
-                    onGameResultState(this, false);
-
-                wonState = new PBool(PBool.EBoolState.False);
-                break;
-
-            case PBool.EBoolState.TrueThisFrame:
-                if (onGameResultState != null)
-                    onGameResultState(this, true);
-
-                wonState = new PBool(PBool.EBoolState.True);
-                break;
         }
 
         if (onUpdatePlayer != null)
@@ -516,24 +469,6 @@ public class Player : NetworkBehaviour
 
             //SetPositionServerRpc(sv.GetRandomSpawnLocation(true).position);
         }
-    }
-
-    [ServerRpc]
-    public void PlayerChangeBombState_ServerRpc(bool hasBomb)
-    {
-        if(hasBomb)
-            this.hasBomb = new PBool(PBool.EBoolState.TrueThisFrame);
-        else
-            this.hasBomb = new PBool(PBool.EBoolState.FalseThisFrame);
-    }
-
-    [ServerRpc]
-    public void PlayerGameResult_ServerRpc(bool hasWon)
-    {
-        if (hasWon)
-            this.hasWon = new PBool(PBool.EBoolState.TrueThisFrame);
-        else
-            this.hasWon = new PBool(PBool.EBoolState.FalseThisFrame);
     }
 
     [ClientRpc]
@@ -734,13 +669,11 @@ public class Player : NetworkBehaviour
         }
     }
 
-    private PlayerUpdateData CraftPlayerUpdateData()
+    protected PlayerUpdateData CraftPlayerUpdateData()
     {
         PlayerUpdateData data = new PlayerUpdateData();
 
         data.isAlive = (isAlive.GetCharState());
-        data.hasBomb = (hasBomb.GetCharState());
-        data.hasWon = (hasWon.GetCharState());
 
         data.stamina = currentStamina;
 
@@ -753,7 +686,7 @@ public class Player : NetworkBehaviour
         return data;
     }
 
-    private bool CheckAuthority(RpcParams rpcParams)
+    protected bool CheckAuthority(RpcParams rpcParams)
     {
         var SenderID = rpcParams.Receive.SenderClientId;
 
@@ -766,7 +699,7 @@ public class Player : NetworkBehaviour
         return true;
     }
 
-    private bool CanPerformDrag()
+    protected bool CanPerformDrag()
     {
         return !isForcedSliding;
     }

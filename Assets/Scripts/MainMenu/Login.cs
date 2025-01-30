@@ -8,8 +8,8 @@ using UnityEngine.UI;
 public class Login : MonoBehaviour
 {
     static public string currentCookie = "";
-
-    private string host = "http://localhost";
+    static public string host = "192.168.8.200"; //Game Host IP
+    static public string host_ = "http://192.168.8.200"; // DB Host IP
 
     [SerializeField] 
     private Button loginButton = null;
@@ -20,6 +20,8 @@ public class Login : MonoBehaviour
     private TMPro.TMP_InputField usernameField = null;
     [SerializeField] 
     private TMPro.TMP_InputField passwordField = null;
+    [SerializeField]
+    private TMPro.TMP_InputField IPField = null;
 
     //false  = done, true = working
     private bool loginState = false; 
@@ -29,12 +31,14 @@ public class Login : MonoBehaviour
     {
         loginButton.onClick.AddListener(OnClickLogin);
         registerButton.onClick.AddListener(OnClickRegister);
+        IPField.onEndEdit.AddListener(OnEndEdit);
     }
 
     private void OnDestroy()
     {
         loginButton.onClick.RemoveAllListeners();
         registerButton.onClick.RemoveAllListeners();
+        IPField.onEndEdit.RemoveAllListeners();
     }
 
     void OnSuccessFullLogin(Dictionary<string, string> jsonBody)
@@ -101,6 +105,14 @@ public class Login : MonoBehaviour
         }
     }
 
+    private void OnEndEdit(string editedText)
+    {
+        if (string.IsNullOrEmpty(editedText))
+            Login.host = "192.168.8.200";
+        else
+            Login.host = $"{editedText}";
+    }
+
     private IEnumerator<UnityWebRequestAsyncOperation> SendLoginRequest(string username, string password)
     {
         WWWForm form = new WWWForm();
@@ -108,7 +120,7 @@ public class Login : MonoBehaviour
         form.AddField("name", username);
         form.AddField("pw", password);
 
-        using (UnityWebRequest request = UnityWebRequest.Post($"{host}/Login.php", form))
+        using (UnityWebRequest request = UnityWebRequest.Post($"{host_}/Login.php", form))
         {
             yield return request.SendWebRequest();
 
@@ -151,7 +163,7 @@ public class Login : MonoBehaviour
         form.AddField("name", username);
         form.AddField("pw", password);
 
-        using (UnityWebRequest request = UnityWebRequest.Post($"{host}/Register.php", form))
+        using (UnityWebRequest request = UnityWebRequest.Post($"{host_}/Register.php", form))
         {
             yield return request.SendWebRequest();
 

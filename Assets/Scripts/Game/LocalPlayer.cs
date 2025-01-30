@@ -1,11 +1,12 @@
 using UnityEngine;
+using UnityEngine.UI;
 
 public class LocalPlayer : MonoBehaviour
 {
     private float CameraRotSpeedX = 100.0f;
     private float CameraRotSpeedY = 100.0f;
 
-    private Player owningPlayer = null;
+    private BombPlayer owningPlayer = null;
     private Camera playerCamera = null;
 
     [SerializeField]
@@ -14,7 +15,10 @@ public class LocalPlayer : MonoBehaviour
     [SerializeField]
     private UI_GameState gameState = null;
 
-    private ServerManager manager = null;
+    [SerializeField]
+    private Slider sensitivitySlider = null;
+
+    private BombGameServerManager manager = null; //AHHHHH
 
     private bool hasPlayer = false;
     private bool mouseLocked = false;
@@ -33,6 +37,11 @@ public class LocalPlayer : MonoBehaviour
             this.owningPlayer.UnbindOnChangeLivingState();
             this.owningPlayer.UnbindOnChangedBombHoldState();
             this.owningPlayer.UnbindOnGameResultState();
+        }
+
+        if(this.sensitivitySlider)
+        {
+            this.sensitivitySlider.onValueChanged.RemoveAllListeners();
         }
     }
 
@@ -191,16 +200,16 @@ public class LocalPlayer : MonoBehaviour
 
     public void BindNetworkPlayer(Player player)
     {
-        this.owningPlayer = player;
+        this.owningPlayer = (BombPlayer)player;
         this.hasPlayer = true;
 
-        player.isLocalPlayer = true;
+        owningPlayer.isLocalPlayer = true;
 
-        player.BindOnDestroy(OnPlayerDestroyed);
-        player.BindOnUpdate(OnPlayerUpdated);
-        player.BindOnChangeLivingState(OnPlayerLivingStateChanged);
-        player.BindOnChangedBombHoldState(OnPlayerBombStatusChanged);
-        player.BindOnGameResultState(OnPlayerGameResultState);
+        owningPlayer.BindOnDestroy(OnPlayerDestroyed);
+        owningPlayer.BindOnUpdate(OnPlayerUpdated);
+        owningPlayer.BindOnChangeLivingState(OnPlayerLivingStateChanged);
+        owningPlayer.BindOnChangedBombHoldState(OnPlayerBombStatusChanged);
+        owningPlayer.BindOnGameResultState(OnPlayerGameResultState);
 
         Cursor.lockState = CursorLockMode.Locked;
 
@@ -211,9 +220,17 @@ public class LocalPlayer : MonoBehaviour
     {
         if (this.owningPlayer.serverManager)
         {
-            this.manager = owningPlayer.serverManager.GetComponent<ServerManager>();
+            this.manager = owningPlayer.serverManager.GetComponent<BombGameServerManager>();
 
             this.manager.GetServerPlayerDataRpc();
+
+            this.sensitivitySlider.onValueChanged.AddListener(OnSensitivityChanged);
         }
+    }
+
+    private void OnSensitivityChanged(float value)
+    {
+        this.CameraRotSpeedX = value;
+        this.CameraRotSpeedY = value;
     }
 }

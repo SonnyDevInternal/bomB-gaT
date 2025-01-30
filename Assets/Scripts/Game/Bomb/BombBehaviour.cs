@@ -1,7 +1,5 @@
 using Assets.Scripts;
 using System.Collections.Generic;
-using System.Linq;
-using TMPro;
 using Unity.Netcode;
 using UnityEngine;
 using static Player;
@@ -46,8 +44,8 @@ public class BombBehaviour : ServerObject
 {
     public Vector3 deathPosition = Vector3.zero;
 
-    private Player owningPlayer = null;
-    public ServerManager serverManager = null;
+    private BombPlayer owningPlayer = null;
+    public BombGameServerManager serverManager = null;
 
     public Collider collider = null;
 
@@ -70,7 +68,7 @@ public class BombBehaviour : ServerObject
     private List<ulong> connectedUsers = new List<ulong>();
     private List<ulong> aliveUsers = null;
 
-    private Player movementHookedPlayer = null; //in case of abrupt destruction, free hook from player
+    private BombPlayer movementHookedPlayer = null; //in case of abrupt destruction, free hook from player
     private Translated_PlayerMovement currentMovementTranslation = new Translated_PlayerMovement(1);
 
     public int connectingUsers = 0;
@@ -159,7 +157,7 @@ public class BombBehaviour : ServerObject
     [ClientRpc]
     private void ClientPassBombClientRpc(ulong PlayerID)
     {
-        owningPlayer = serverManager.FindPlayer(PlayerID);
+        owningPlayer = (BombPlayer)serverManager.FindPlayer(PlayerID);
     }
 
     [ServerRpc]
@@ -185,7 +183,7 @@ public class BombBehaviour : ServerObject
 
         UnhookPlayerMovement_ServerRpc();
 
-        owningPlayer = serverManager.FindPlayer(PlayerID);
+        owningPlayer = (BombPlayer)serverManager.FindPlayer(PlayerID);
 
         if(!owningPlayer)  //Check for Disconnected Players
         {
@@ -282,7 +280,7 @@ public class BombBehaviour : ServerObject
         {
             ulong playerAliveID = aliveUsers[0];
 
-            Player alivePlayer = serverManager.FindPlayer(playerAliveID);
+            BombPlayer alivePlayer = (BombPlayer)serverManager.FindPlayer(playerAliveID);
 
             if (alivePlayer) //Check if player left
             {
@@ -296,7 +294,7 @@ public class BombBehaviour : ServerObject
 
             for (int i = 0; i < connectedUsers.Count; i++)
             {
-                Player deadPlayer = serverManager.FindPlayer(connectedUsers[i]);
+                BombPlayer deadPlayer = (BombPlayer)serverManager.FindPlayer(connectedUsers[i]);
 
                 if (deadPlayer) //Check if player left
                 {
@@ -358,7 +356,7 @@ public class BombBehaviour : ServerObject
     [ServerRpc]
     private void HookPlayerMovement_ServerRpc(ulong playerID)
     {
-        var player = serverManager.FindPlayer(playerID);
+        var player = (BombPlayer)serverManager.FindPlayer(playerID);
 
         if (player && !player.IsMovementHooked())
         {
